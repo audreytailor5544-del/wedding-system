@@ -19,9 +19,13 @@
 - .env.local 은 사용자가 직접 관리. 코드는 환경 변수만 읽고, 키 값을 코드에 박지 말 것
 
 ## 디자인 규칙
-- 디자인 관련 작업 시 design.md 참고
-- 폰트: Pretendard 유지 (다른 폰트 추가 금지)
-- 기울임체 (italic) 사용 금지
+- 디자인 관련 작업 시 design.md를 기준으로 삼되, 아래 한글 환경 규칙이 항상 우선
+- 색·간격·radius·그림자·레이아웃 톤은 design.md 그대로 따름
+
+### 한글 환경 우선 규칙 (design.md보다 항상 우선)
+1. **폰트**: 본문·UI 전체 Pretendard 고정. design.md가 다른 영문 폰트(serif·display 등)를 지정해도 한글 텍스트엔 절대 사용하지 말 것
+2. **italic 금지**: 한글 기울임은 어색하게 깨짐. `font-style: italic` 사용 금지. 강조는 `font-weight` 또는 색으로 표현
+3. design.md에서 위 두 항목과 충돌하는 지정이 있어도 이 규칙을 따름
 
 ## Phase 진행 규칙
 - service-prd.md = Phase 1 (MVP) + Phase 2~5 (고도화)

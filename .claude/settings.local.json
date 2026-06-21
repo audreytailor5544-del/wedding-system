@@ -4,7 +4,8 @@
       "PowerShell(node --version)",
       "PowerShell(npm --version)",
       "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); node --version; npm --version; git --version)",
-      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\user\\\\Desktop\\\\웨딩시스템\" -Force | Where-Object { $_.Name -ne \"node_modules\" } | Select-Object Name, LastWriteTime)"
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\user\\\\Desktop\\\\웨딩시스템\" -Force | Where-Object { $_.Name -ne \"node_modules\" } | Select-Object Name, LastWriteTime)",
+      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); Set-Location \"C:\\\\Users\\\\user\\\\Desktop\\\\웨딩시스템\"; Start-Process powershell -ArgumentList \"-NoExit\", \"-Command\", \"npm run dev\" -WindowStyle Normal)"
     ]
   }
 }
