@@ -438,10 +438,11 @@ export function ContractFormModal({
         {/* ── 기본 예약 정보 ── */}
         <div style={{ marginBottom: 24 }}>
           <div style={sec}>기본 예약 정보</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
             <Field label="예약자 성명"><input style={inpFilled} readOnly value={r.brideName} /></Field>
-            <Field label="연락처"><input style={inpFilled} readOnly value={r.bridePhone} /></Field>
+            <Field label="신부 연락처"><input style={inpFilled} readOnly value={r.bridePhone} /></Field>
             <Field label="신랑 성함"><input style={inpFilled} readOnly value={r.groomName} /></Field>
+            <Field label="신랑 연락처"><input style={inpFilled} readOnly value={r.groomPhone} /></Field>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
             <Field label="비상 연락처"><input style={inp} value={f.emergencyPhone} onChange={set('emergencyPhone')} placeholder="010-0000-0000" /></Field>
@@ -453,10 +454,16 @@ export function ContractFormModal({
             <Field label="예약금"><input style={inp} value={f.depositAmount} onChange={set('depositAmount')} placeholder="예: 300,000" /></Field>
             <Field label="입금일자"><input style={inp} type="date" value={f.depositDate} onChange={set('depositDate')} /></Field>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
             <Field label="작가 업체명"><input style={inpFilled} readOnly value={r.photoStudio} /></Field>
             <Field label="촬영 일자"><input style={inpFilled} readOnly value={r.snapDate} /></Field>
+            <Field label="촬영 시작시간"><input style={inpFilled} readOnly value={r.snapTime} /></Field>
             <Field label="헤어/메이크업샵"><input style={inp} value={f.hairShop} onChange={set('hairShop')} placeholder="업체명" /></Field>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10 }}>
+            <Field label="헤어메이크업 날짜"><input style={inpFilled} readOnly value={r.hairDate} /></Field>
+            <Field label="헤어메이크업 시간"><input style={inpFilled} readOnly value={r.hairTime} /></Field>
+            <Field label="현금영수증 번호"><input style={inpFilled} readOnly value={r.receiptNumber} /></Field>
             <Field label="상품 결제 방법">
               <select style={inp} value={f.paymentMethod} onChange={set('paymentMethod')}>
                 <option value="">선택</option>

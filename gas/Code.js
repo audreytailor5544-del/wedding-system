@@ -4,6 +4,7 @@
 const SPREADSHEET_ID = '1narswOt-LTZ6TGvRJcucGrql7HB5GGEU5tHEDg5j50I'
 const SHEET_NAME = '예약마스터'
 const CONTRACT_SHEET = '대여계약서'
+const SETTINGS_SHEET = '설정'
 
 // 대여계약서 컬럼 — KEYS(영문, 클라이언트 전송 키)와 HEADERS(한글, 시트 표시)는
 // 같은 순서/길이를 유지한다. (작성일시는 1열에 별도로 GAS가 채움)
@@ -83,7 +84,47 @@ function getContractSheet() {
   return sheet
 }
 
-// GET: 예약마스터 탭의 모든 예약을 JSON으로 반환
+// 설정 탭 (카테고리 이름 등 키-값) 가져오기/생성
+function getSettingsSheet() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID)
+  let sheet = ss.getSheetByName(SETTINGS_SHEET)
+  if (!sheet) {
+    sheet = ss.insertSheet(SETTINGS_SHEET)
+    sheet.appendRow(['카테고리ID', '표시이름'])
+    sheet.getRange(1, 1, 1, 2).setFontWeight('bold')
+    sheet.setFrozenRows(1)
+  }
+  return sheet
+}
+
+// 설정 탭에서 카테고리 이름 맵 {id: label} 읽기
+function getCategories() {
+  const sheet = getSettingsSheet()
+  const values = sheet.getDataRange().getValues()
+  const map = {}
+  for (let i = 1; i < values.length; i++) {
+    if (values[i][0]) map[String(values[i][0])] = String(values[i][1] || '')
+  }
+  return map
+}
+
+// 예약마스터 행을 예약ID로 찾아 겹치는 항목 갱신 (값이 있는 항목만)
+function updateReservationRow(id, fields) {
+  if (!id) return
+  const sheet = getSheet()
+  const values = sheet.getDataRange().getValues()
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][1]) === String(id)) {
+      Object.keys(fields).forEach(function (col) {
+        const val = fields[col]
+        if (val != null && val !== '') sheet.getRange(i + 1, Number(col)).setValue(val)
+      })
+      return
+    }
+  }
+}
+
+// GET: 예약마스터 탭의 모든 예약 + 카테고리 이름을 JSON으로 반환
 function doGet() {
   try {
     const sheet = getSheet()
@@ -102,9 +143,9 @@ function doGet() {
           inflow: r[17], notes: r[18], receiptNumber: r[19], category: r[20],
         }
       })
-    return jsonRes({ reservations: reservations })
+    return jsonRes({ reservations: reservations, categories: getCategories() })
   } catch (err) {
-    return jsonRes({ reservations: [], error: String(err) })
+    return jsonRes({ reservations: [], categories: {}, error: String(err) })
   }
 }
 
@@ -136,7 +177,25 @@ function doPost(e) {
         return c[k] != null ? c[k] : ''
       }))
       cSheet.appendRow(row)
+      // 예약마스터의 해당 예약 행에 겹치는 항목 동기화 (열 번호 = 예약마스터 컬럼)
+      updateReservationRow(c.id, {
+        5: c.bridePhone, 6: c.groomName,
+        8: c.fittingDate, 9: c.fittingTime, 12: c.snapDate,
+        14: c.photoStudio, 15: c.product, 16: c.helperService,
+        17: c.flowerApplied === 'O' ? c.flowerShop : '', 20: c.receiptNumber,
+      })
       return jsonRes({ success: true, id: c.id || '' })
+    }
+
+    if (body.action === 'saveCategories') {
+      const cats = body.categories || {}
+      const sSheet = getSettingsSheet()
+      const last = sSheet.getLastRow()
+      if (last > 1) sSheet.deleteRows(2, last - 1) // 헤더만 남기고 비움
+      Object.keys(cats).forEach(function (id) {
+        sSheet.appendRow([id, cats[id]])
+      })
+      return jsonRes({ success: true })
     }
 
     if (body.action === 'updateStatus') {

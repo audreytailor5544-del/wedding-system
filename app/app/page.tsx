@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useRef, useEffect } from 'react'
+import { useState, useMemo, useRef, useEffect, createContext, useContext } from 'react'
 import { ContractFormModal } from './ContractForm'
 
 // ─── 타입 & 상수 ─────────────────────────────────────────────────
@@ -18,6 +18,15 @@ const CATEGORIES = [
 ] as const
 
 type CategoryId = typeof CATEGORIES[number]['id']
+
+// 카테고리 표시 이름 — 시트의 '설정' 탭에서 불러온 override 를 컨텍스트로 공유한다.
+// id/색상은 고정, 이름(label)만 직원이 수정 가능.
+const CatLabelCtx = createContext<Record<string, string>>({})
+function useCatLabel() {
+  const overrides = useContext(CatLabelCtx)
+  return (id: string) =>
+    overrides[id] || CATEGORIES.find(c => c.id === id)?.label || id
+}
 
 type Reservation = {
   id: string
@@ -295,6 +304,8 @@ function ReservationForm({
     onSubmit(form, withContract)
   }
 
+  const labelOf = useCatLabel()
+
   return (
     <div style={{
       position: 'fixed', inset: 0,
@@ -418,7 +429,7 @@ function ReservationForm({
                       transition: 'all 0.15s',
                     }}
                   >
-                    {cat.label}
+                    {labelOf(cat.id)}
                   </button>
                 )
               })}
@@ -514,6 +525,7 @@ function ReservationDetail({
   onOpenContractForm?: () => void
 }) {
   const statusStyle = STATUS_STYLE[reservation.status]
+  const labelOf = useCatLabel()
 
   return (
     <div style={{
@@ -587,7 +599,7 @@ function ReservationDetail({
                           fontSize: 11, fontWeight: 500,
                         }}
                       >
-                        {cat.label}
+                        {labelOf(cat.id)}
                       </span>
                     ) : null
                   })}
@@ -636,13 +648,53 @@ export default function AppDashboard() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [sheetsLoading, setSheetsLoading] = useState(true)
   const [sheetsError, setSheetsError] = useState(false)
+  const [catLabels, setCatLabels] = useState<Record<string, string>>({})
+  const [editingCats, setEditingCats] = useState(false)
+  const [draftLabels, setDraftLabels] = useState<Record<string, string>>({})
+  const [savingCats, setSavingCats] = useState(false)
   const searchRef = useRef<HTMLDivElement>(null)
+
+  // 카테고리 표시 이름 (override 없으면 기본값)
+  const labelOf = (id: string) =>
+    catLabels[id] || CATEGORIES.find(c => c.id === id)?.label || id
+
+  // 이름 수정 시작 — 현재 이름들을 draft 로 복사
+  const startEditCats = () => {
+    const draft: Record<string, string> = {}
+    CATEGORIES.forEach(c => { draft[c.id] = labelOf(c.id) })
+    setDraftLabels(draft)
+    setEditingCats(true)
+  }
+
+  // 이름 저장 — 시트에 기록하고 화면 반영
+  const saveCats = async () => {
+    setSavingCats(true)
+    try {
+      const res = await fetch('/api/sheets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'saveCategories', categories: draftLabels }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        setCatLabels(draftLabels)
+        setEditingCats(false)
+      } else {
+        alert('카테고리 저장 실패: ' + (data.error || '알 수 없는 오류'))
+      }
+    } catch {
+      alert('카테고리 저장 중 오류가 발생했습니다.')
+    } finally {
+      setSavingCats(false)
+    }
+  }
 
   // 앱 로드 시 구글 시트에서 예약 불러오기
   useEffect(() => {
     fetch('/api/sheets')
       .then(r => r.json())
-      .then((data: { reservations?: Record<string, string>[] }) => {
+      .then((data: { reservations?: Record<string, string>[]; categories?: Record<string, string> }) => {
+        if (data.categories) setCatLabels(data.categories)
         if (data.reservations && data.reservations.length > 0) {
           setReservations(
             data.reservations.map(row => ({
@@ -786,6 +838,7 @@ export default function AppDashboard() {
   }
 
   return (
+    <CatLabelCtx.Provider value={catLabels}>
     <div style={{
       display: 'flex', height: '100vh',
       fontFamily: "'Pretendard Variable', Pretendard, -apple-system, sans-serif",
@@ -816,18 +869,30 @@ export default function AppDashboard() {
         </button>
 
         <div>
-          <div style={{ fontSize: 10, fontWeight: 700, color: '#bbb', letterSpacing: '0.1em', marginBottom: 10, padding: '0 4px' }}>
-            카테고리
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, padding: '0 4px' }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: '#bbb', letterSpacing: '0.1em' }}>
+              카테고리
+            </span>
+            {editingCats ? (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={() => setEditingCats(false)} style={{ background: 'none', border: 'none', fontSize: 11, color: '#aaa', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>취소</button>
+                <button onClick={saveCats} disabled={savingCats} style={{ background: 'none', border: 'none', fontSize: 11, color: '#0096f7', fontWeight: 600, cursor: savingCats ? 'default' : 'pointer', fontFamily: 'inherit', padding: 0, opacity: savingCats ? 0.5 : 1 }}>
+                  {savingCats ? '저장 중…' : '저장'}
+                </button>
+              </div>
+            ) : (
+              <button onClick={startEditCats} style={{ background: 'none', border: 'none', fontSize: 11, color: '#bbb', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>이름 수정</button>
+            )}
           </div>
           {CATEGORIES.map(cat => (
             <div
               key={cat.id}
-              onClick={() => toggleCategory(cat.id)}
+              onClick={editingCats ? undefined : () => toggleCategory(cat.id)}
               style={{
                 display: 'flex', alignItems: 'center', gap: 9,
-                padding: '6px 4px', cursor: 'pointer',
+                padding: '6px 4px', cursor: editingCats ? 'default' : 'pointer',
                 borderRadius: 8,
-                opacity: activeCategories.has(cat.id) ? 1 : 0.3,
+                opacity: editingCats || activeCategories.has(cat.id) ? 1 : 0.3,
                 transition: 'opacity 0.15s',
               }}
             >
@@ -835,7 +900,15 @@ export default function AppDashboard() {
                 width: 10, height: 10, borderRadius: '50%',
                 backgroundColor: cat.color, flexShrink: 0,
               }} />
-              <span style={{ fontSize: 13, color: '#222' }}>{cat.label}</span>
+              {editingCats ? (
+                <input
+                  value={draftLabels[cat.id] ?? ''}
+                  onChange={e => setDraftLabels(d => ({ ...d, [cat.id]: e.target.value }))}
+                  style={{ flex: 1, minWidth: 0, fontSize: 13, padding: '3px 7px', border: '1px solid #e0ddd8', borderRadius: 6, fontFamily: 'inherit', color: '#222', outline: 'none' }}
+                />
+              ) : (
+                <span style={{ fontSize: 13, color: '#222' }}>{labelOf(cat.id)}</span>
+              )}
             </div>
           ))}
         </div>
@@ -946,7 +1019,7 @@ export default function AppDashboard() {
                             {r.fittingTime && ` ${r.fittingTime}`}
                             {r.categories.length > 0 && (
                               <span style={{ marginLeft: 6 }}>
-                                {r.categories.map(cId => CATEGORIES.find(c => c.id === cId)?.label).filter(Boolean).join(', ')}
+                                {r.categories.map(cId => labelOf(cId)).filter(Boolean).join(', ')}
                               </span>
                             )}
                           </div>
@@ -1108,5 +1181,6 @@ export default function AppDashboard() {
         />
       )}
     </div>
+    </CatLabelCtx.Provider>
   )
 }
