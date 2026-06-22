@@ -642,6 +642,7 @@ function ReservationDetail({
 type Staff = {
   registeredAt?: string; hireDate: string; name: string; dept: string; position: string
   phone: string; rrn: string; address: string; memo: string; categories: string
+  staffNo?: string; password?: string
 }
 
 function StaffPanel({
@@ -657,6 +658,7 @@ function StaffPanel({
   const empty = { hireDate: '', name: '', dept: '', position: '', phone: '', rrn: '', address: '', memo: '', categories: [] as string[] }
   const [form, setForm] = useState(empty)
   const [saving, setSaving] = useState(false)
+  const [created, setCreated] = useState<{ name: string; staffNo: string; password: string } | null>(null)
 
   const set = (key: keyof typeof form) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
@@ -681,6 +683,7 @@ function StaffPanel({
       })
       const data = await res.json()
       if (data.success) {
+        setCreated({ name: form.name, staffNo: data.staffNo, password: data.password })
         setForm(empty)
         onRegistered()
       } else {
@@ -745,6 +748,17 @@ function StaffPanel({
             style={{ width: '100%', padding: '12px 0', borderRadius: 12, border: 'none', backgroundColor: '#0096f7', color: '#fff', fontSize: 14, fontWeight: 600, cursor: saving ? 'default' : 'pointer', fontFamily: 'inherit', opacity: saving ? 0.6 : 1 }}>
             {saving ? '저장 중…' : '직원 등록'}
           </button>
+
+          {created && (
+            <div style={{ marginTop: 14, padding: '14px 16px', backgroundColor: '#eaf6ff', border: '1px solid #b6e0ff', borderRadius: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#0070c0', marginBottom: 8 }}>✓ {created.name} 님 등록 완료 — 로그인 정보</div>
+              <div style={{ display: 'flex', gap: 20, fontSize: 14 }}>
+                <span style={{ color: '#333' }}>직원번호 <b style={{ fontSize: 16 }}>{created.staffNo}</b></span>
+                <span style={{ color: '#333' }}>비밀번호 <b style={{ fontSize: 16, letterSpacing: 1 }}>{created.password}</b></span>
+              </div>
+              <p style={{ fontSize: 11, color: '#5a9', marginTop: 8 }}>이 정보를 직원에게 전달하세요. (직원 목록에서 다시 확인 가능)</p>
+            </div>
+          )}
         </div>
 
         {/* 직원 목록 */}
@@ -766,6 +780,12 @@ function StaffPanel({
                     {s.hireDate && <span>입사 {s.hireDate}</span>}
                     {s.categories && <span>권한: {String(s.categories).split(', ').filter(Boolean).map(id => labelOf(id)).join(', ')}</span>}
                   </div>
+                  {(s.staffNo || s.password) && (
+                    <div style={{ fontSize: 12, color: '#0070c0', marginTop: 4, display: 'flex', gap: 14 }}>
+                      <span>직원번호 <b>{s.staffNo}</b></span>
+                      <span>비밀번호 <b>{s.password}</b></span>
+                    </div>
+                  )}
                   {s.memo && <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>{s.memo}</div>}
                 </div>
               ))}
@@ -898,6 +918,210 @@ function StatsPanel({
   )
 }
 
+// ─── 회계 관리자 패널 ─────────────────────────────────────────────
+
+type Income = { date: string; name: string; amount: number }
+type Expense = { date: string; account: string; item: string; amount: number; method: string; memo: string }
+
+const ACCOUNTS = ['임대료', '인건비', '재료/사입', '마케팅', '운영비', '세금/공과금', '외주비', '기타']
+const won = (n: number) => `${Math.round(n).toLocaleString()}원`
+
+function AccountingPanel({ onClose }: { onClose: () => void }) {
+  const [income, setIncome] = useState<Income[]>([])
+  const [expenses, setExpenses] = useState<Expense[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const emptyForm = { date: '', account: '', item: '', amount: '', method: '', memo: '' }
+  const [form, setForm] = useState(emptyForm)
+
+  const load = () => {
+    setLoading(true)
+    fetch('/api/sheets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'getAccounting' }) })
+      .then(r => r.json())
+      .then((d: { income?: Income[]; expenses?: Expense[] }) => { setIncome(d.income || []); setExpenses(d.expenses || []) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }
+  useEffect(load, [])
+
+  const set = (k: keyof typeof form) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+      setForm(f => ({ ...f, [k]: e.target.value }))
+
+  const addExpense = async () => {
+    if (!form.account.trim() || !form.amount) { alert('계정과 금액을 입력하세요.'); return }
+    setSaving(true)
+    try {
+      const res = await fetch('/api/sheets', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'addExpense', expense: { ...form, amount: String(form.amount).replace(/[^0-9.-]/g, '') } }),
+      })
+      const data = await res.json()
+      if (data.success) { setForm(emptyForm); load() }
+      else alert('지출 저장 실패: ' + (data.error || ''))
+    } catch { alert('지출 저장 중 오류가 발생했습니다.') } finally { setSaving(false) }
+  }
+
+  const totalIncome = income.reduce((s, x) => s + x.amount, 0)
+  const totalExpense = expenses.reduce((s, x) => s + x.amount, 0)
+  const net = totalIncome - totalExpense
+
+  const byAccount = useMemo(() => {
+    const map: Record<string, number> = {}
+    expenses.forEach(x => { const a = x.account || '(미분류)'; map[a] = (map[a] || 0) + x.amount })
+    return Object.entries(map).sort((a, b) => b[1] - a[1])
+  }, [expenses])
+  const maxAcc = Math.max(1, ...byAccount.map(a => a[1]))
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 24,
+    }}>
+      <div style={{ backgroundColor: '#fff', borderRadius: 18, width: '100%', maxWidth: 720, maxHeight: '92vh', overflow: 'auto', padding: 32 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>회계 관리</h2>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#999', lineHeight: 1 }}>✕</button>
+        </div>
+        <p style={{ fontSize: 12, color: '#aaa', margin: '0 0 22px' }}>수입은 저장된 대여계약서에서 자동 집계됩니다.</p>
+
+        {/* 요약 카드 */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 28 }}>
+          {[
+            { label: '총 수입', value: totalIncome, color: '#0096f7' },
+            { label: '총 지출', value: totalExpense, color: '#ef4444' },
+            { label: '순이익', value: net, color: net >= 0 ? '#16a34a' : '#ef4444' },
+          ].map(c => (
+            <div key={c.label} style={{ padding: '16px 18px', backgroundColor: '#fafaf7', borderRadius: 12 }}>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>{c.label}</div>
+              <div style={{ fontSize: 19, fontWeight: 700, color: c.color }}>{won(c.value)}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* 지출 등록 */}
+        <div style={{ marginBottom: 28 }}>
+          <div style={sectionTitleStyle}>지출 등록</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
+            <div><label style={labelStyle}>지출일</label><input style={inputStyle} type="date" value={form.date} onChange={set('date')} /></div>
+            <div>
+              <label style={labelStyle}>계정 *</label>
+              <input style={inputStyle} list="acc-list" value={form.account} onChange={set('account')} placeholder="목록 선택 또는 직접 입력" />
+              <datalist id="acc-list">{ACCOUNTS.map(a => <option key={a} value={a} />)}</datalist>
+            </div>
+            <div><label style={labelStyle}>금액 *</label><input style={inputStyle} value={form.amount} onChange={set('amount')} placeholder="예: 500,000" inputMode="numeric" /></div>
+            <div><label style={labelStyle}>항목</label><input style={inputStyle} value={form.item} onChange={set('item')} placeholder="항목명" /></div>
+            <div>
+              <label style={labelStyle}>결제수단</label>
+              <select style={inputStyle} value={form.method} onChange={set('method')}>
+                <option value="">선택</option>
+                <option value="카드">카드</option>
+                <option value="이체">이체</option>
+                <option value="현금">현금</option>
+              </select>
+            </div>
+            <div><label style={labelStyle}>메모</label><input style={inputStyle} value={form.memo} onChange={set('memo')} placeholder="메모" /></div>
+          </div>
+          <button onClick={addExpense} disabled={saving}
+            style={{ width: '100%', padding: '11px 0', borderRadius: 12, border: 'none', backgroundColor: '#ef4444', color: '#fff', fontSize: 14, fontWeight: 600, cursor: saving ? 'default' : 'pointer', fontFamily: 'inherit', opacity: saving ? 0.6 : 1 }}>
+            {saving ? '저장 중…' : '지출 추가'}
+          </button>
+        </div>
+
+        {/* 계정별 지출 */}
+        <div style={{ marginBottom: 28 }}>
+          <div style={sectionTitleStyle}>계정별 지출</div>
+          {byAccount.length === 0 ? <p style={{ fontSize: 13, color: '#aaa' }}>지출 내역 없음</p> :
+            byAccount.map(([acc, amt]) => (
+              <StatBar key={acc} label={acc} count={amt} max={maxAcc} color="#ef4444" />
+            ))}
+        </div>
+
+        {/* 지출 내역 */}
+        <div style={{ marginBottom: 28 }}>
+          <div style={sectionTitleStyle}>지출 내역 ({expenses.length}건)</div>
+          {loading ? <p style={{ fontSize: 13, color: '#aaa' }}>불러오는 중…</p> :
+            expenses.length === 0 ? <p style={{ fontSize: 13, color: '#aaa' }}>지출 내역 없음</p> :
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {expenses.map((x, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, padding: '8px 12px', backgroundColor: '#fafaf7', borderRadius: 8 }}>
+                  <span style={{ width: 84, color: '#888', flexShrink: 0 }}>{x.date || '-'}</span>
+                  <span style={{ width: 80, color: '#ef4444', fontWeight: 600, flexShrink: 0 }}>{x.account}</span>
+                  <span style={{ flex: 1, color: '#444', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{[x.item, x.memo].filter(Boolean).join(' · ')}</span>
+                  <span style={{ fontWeight: 600, color: '#222', flexShrink: 0 }}>{won(x.amount)}</span>
+                </div>
+              ))}
+            </div>}
+        </div>
+
+        {/* 수입 내역 (계약 기반) */}
+        <div>
+          <div style={sectionTitleStyle}>수입 내역 — 계약 ({income.length}건)</div>
+          {loading ? <p style={{ fontSize: 13, color: '#aaa' }}>불러오는 중…</p> :
+            income.length === 0 ? <p style={{ fontSize: 13, color: '#aaa' }}>저장된 계약서가 없습니다.</p> :
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {income.map((x, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, padding: '8px 12px', backgroundColor: '#f3f9ff', borderRadius: 8 }}>
+                  <span style={{ flex: 1, color: '#444' }}>{x.name || '(이름없음)'}</span>
+                  <span style={{ fontWeight: 600, color: '#0096f7', flexShrink: 0 }}>{won(x.amount)}</span>
+                </div>
+              ))}
+            </div>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── 로그인 화면 ──────────────────────────────────────────────────
+
+function LoginScreen({ onLogin }: { onLogin: (staffNo: string, password: string) => Promise<string | null> }) {
+  const [staffNo, setStaffNo] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!staffNo.trim() || !password.trim()) { setError('직원번호와 비밀번호를 입력하세요.'); return }
+    setLoading(true); setError('')
+    const err = await onLogin(staffNo.trim(), password.trim())
+    if (err) setError(err)
+    setLoading(false)
+  }
+
+  return (
+    <div style={{
+      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      backgroundColor: '#fdfdf7',
+      fontFamily: "'Pretendard Variable', Pretendard, -apple-system, sans-serif",
+    }}>
+      <form onSubmit={submit} style={{ width: '100%', maxWidth: 340, padding: 32 }}>
+        <div style={{ textAlign: 'center', marginBottom: 28 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.16em', color: '#000', marginBottom: 8 }}>AUDREYTAILOR</div>
+          <div style={{ fontSize: 14, color: '#888' }}>직원 로그인</div>
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <label style={labelStyle}>직원번호</label>
+          <input style={inputStyle} value={staffNo} onChange={e => setStaffNo(e.target.value)} placeholder="예: 1001" inputMode="numeric" />
+        </div>
+        <div style={{ marginBottom: 16 }}>
+          <label style={labelStyle}>비밀번호</label>
+          <input style={inputStyle} type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="비밀번호" />
+        </div>
+        {error && <p style={{ fontSize: 12, color: '#e54848', marginBottom: 12 }}>{error}</p>}
+        <button type="submit" disabled={loading}
+          style={{ width: '100%', padding: '12px 0', borderRadius: 12, border: 'none', backgroundColor: '#0096f7', color: '#fff', fontSize: 14, fontWeight: 600, cursor: loading ? 'default' : 'pointer', fontFamily: 'inherit', opacity: loading ? 0.6 : 1 }}>
+          {loading ? '확인 중…' : '로그인'}
+        </button>
+        <p style={{ fontSize: 11, color: '#bbb', textAlign: 'center', marginTop: 16 }}>
+          직원번호·비밀번호는 관리자가 직원 등록 시 발급합니다.
+        </p>
+      </form>
+    </div>
+  )
+}
+
 // ─── 메인 대시보드 ────────────────────────────────────────────────
 
 export default function AppDashboard() {
@@ -924,8 +1148,46 @@ export default function AppDashboard() {
   const [staff, setStaff] = useState<Staff[]>([])
   const [showStaffPanel, setShowStaffPanel] = useState(false)
   const [showStats, setShowStats] = useState(false)
+  const [showAccounting, setShowAccounting] = useState(false)
   const [lists, setLists] = useState<{ photoVendors: string[]; products: string[] }>({ photoVendors: [], products: [] })
+  const [auth, setAuth] = useState<{ staffNo: string; name: string } | null>(null)
+  const [authChecked, setAuthChecked] = useState(false)
   const searchRef = useRef<HTMLDivElement>(null)
+
+  // 로그인 세션 복원 (새로고침해도 유지)
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('staffSession')
+      if (saved) setAuth(JSON.parse(saved))
+    } catch { /* 무시 */ }
+    setAuthChecked(true)
+  }, [])
+
+  // 직원번호+비밀번호 로그인 — 성공 시 null, 실패 시 오류 메시지 반환
+  const handleLogin = async (staffNo: string, password: string): Promise<string | null> => {
+    try {
+      const res = await fetch('/api/sheets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'login', staffNo, password }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        const session = { staffNo: data.staffNo, name: data.name }
+        setAuth(session)
+        try { localStorage.setItem('staffSession', JSON.stringify(session)) } catch { /* 무시 */ }
+        return null
+      }
+      return data.error || '로그인에 실패했습니다.'
+    } catch {
+      return '로그인 중 오류가 발생했습니다.'
+    }
+  }
+
+  const handleLogout = () => {
+    setAuth(null)
+    try { localStorage.removeItem('staffSession') } catch { /* 무시 */ }
+  }
 
   // 직원 목록 새로고침
   const reloadStaff = () => {
@@ -1120,6 +1382,15 @@ export default function AppDashboard() {
     }).catch(console.error)
   }
 
+  // 로그인 게이트
+  // - 세션 확인 전: 빈 화면
+  // - 미로그인 + 직원 데이터 로딩 중: 빈 화면 (판단 보류)
+  // - 미로그인 + 등록된 직원 있음: 로그인 화면
+  // - 미로그인 + 등록된 직원 0명: 최초 셋업을 위해 통과 (첫 직원 등록 가능)
+  if (!authChecked) return null
+  if (!auth && sheetsLoading) return null
+  if (!auth && staff.length > 0) return <LoginScreen onLogin={handleLogin} />
+
   return (
     <CatLabelCtx.Provider value={catLabels}>
     <div style={{
@@ -1208,6 +1479,16 @@ export default function AppDashboard() {
             통계
           </button>
           <button
+            onClick={() => setShowAccounting(true)}
+            style={{
+              background: 'none', border: '1px solid #e7e3e1',
+              borderRadius: 10, padding: '9px 0', fontSize: 12, color: '#666',
+              cursor: 'pointer', width: '100%', fontFamily: 'inherit',
+            }}
+          >
+            회계
+          </button>
+          <button
             onClick={() => setShowStaffPanel(true)}
             style={{
               background: 'none', border: '1px solid #e7e3e1',
@@ -1217,6 +1498,23 @@ export default function AppDashboard() {
           >
             직원 관리
           </button>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 6, borderTop: '1px solid #f0ede8' }}>
+            {auth ? (
+              <>
+                <span style={{ fontSize: 11, color: '#999', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {auth.name} 님
+                </span>
+                <button
+                  onClick={handleLogout}
+                  style={{ background: 'none', border: 'none', fontSize: 11, color: '#bbb', cursor: 'pointer', fontFamily: 'inherit', padding: '2px 4px', flexShrink: 0 }}
+                >
+                  로그아웃
+                </button>
+              </>
+            ) : (
+              <span style={{ fontSize: 11, color: '#e08a00' }}>최초 설정 — 직원을 등록하세요</span>
+            )}
+          </div>
         </div>
       </aside>
 
@@ -1504,6 +1802,10 @@ export default function AppDashboard() {
           month={currentMonth}
           onClose={() => setShowStats(false)}
         />
+      )}
+
+      {showAccounting && (
+        <AccountingPanel onClose={() => setShowAccounting(false)} />
       )}
     </div>
     </CatLabelCtx.Provider>

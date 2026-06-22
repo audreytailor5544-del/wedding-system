@@ -8,10 +8,13 @@ const SETTINGS_SHEET = '설정'
 const STAFF_SHEET = '직원'
 const PHOTO_SHEET = '포토거래처'
 const PRODUCT_SHEET = '이용상품'
+const EXPENSE_SHEET = '지출'
+
+const EXPENSE_HEADERS = ['등록일시', '지출일', '계정', '항목', '금액', '결제수단', '메모']
 
 const STAFF_HEADERS = [
   '등록일시', '입사일', '성명', '부서', '직급', '연락처',
-  '주민번호', '주소', '기타메모', '카테고리권한',
+  '주민번호', '주소', '기타메모', '카테고리권한', '직원번호', '비밀번호',
 ]
 
 // 대여계약서 컬럼 — KEYS(영문, 클라이언트 전송 키)와 HEADERS(한글, 시트 표시)는
@@ -111,13 +114,32 @@ function getStaffSheet() {
   let sheet = ss.getSheetByName(STAFF_SHEET)
   if (!sheet) {
     sheet = ss.insertSheet(STAFF_SHEET)
-    sheet.appendRow(STAFF_HEADERS)
-    sheet.getRange(1, 1, 1, STAFF_HEADERS.length).setFontWeight('bold')
     sheet.setFrozenRows(1)
   }
-  // 등록일시(1열)만 날짜, 나머지는 텍스트 (입사일·연락처·주민번호 보존)
+  // 헤더를 항상 최신 STAFF_HEADERS 로 맞춤 (직원번호·비밀번호 컬럼 추가 반영)
+  sheet.getRange(1, 1, 1, STAFF_HEADERS.length).setValues([STAFF_HEADERS]).setFontWeight('bold')
+  // 등록일시(1열)만 날짜, 나머지는 텍스트 (입사일·연락처·주민번호·직원번호 보존)
   sheet.getRange(1, 2, sheet.getMaxRows(), STAFF_HEADERS.length - 1).setNumberFormat('@')
   return sheet
+}
+
+// 6자리 직원번호 생성 (기존 최대값 + 1, 시작 1001)
+function nextStaffNo(sheet) {
+  const values = sheet.getDataRange().getValues()
+  let max = 1000
+  for (let i = 1; i < values.length; i++) {
+    const n = parseInt(values[i][10], 10) // 11열 = 직원번호
+    if (!isNaN(n) && n > max) max = n
+  }
+  return String(max + 1)
+}
+
+// 읽기 쉬운 6자리 비밀번호 생성 (혼동되는 0/O/1/l 제외)
+function genPassword() {
+  const chars = 'abcdefghjkmnpqrstuvwxyz23456789'
+  let out = ''
+  for (let i = 0; i < 6; i++) out += chars.charAt(Math.floor(Math.random() * chars.length))
+  return out
 }
 
 // 단일 컬럼 목록 탭(포토거래처/이용상품 등) 가져오기/생성
@@ -166,9 +188,81 @@ function getStaffList() {
     list.push({
       registeredAt: r[0], hireDate: r[1], name: r[2], dept: r[3], position: r[4],
       phone: r[5], rrn: r[6], address: r[7], memo: r[8], categories: r[9],
+      staffNo: r[10], password: r[11],
     })
   }
   return list
+}
+
+// ── 회계 ──────────────────────────────────────────────
+// 금액 문자열("1,500,000")을 숫자로 파싱
+function parseAmt(v) {
+  const n = Number(String(v == null ? '' : v).replace(/[^0-9.-]/g, ''))
+  return isNaN(n) ? 0 : n
+}
+
+// 지출 탭 가져오기/생성
+function getExpenseSheet() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID)
+  let sheet = ss.getSheetByName(EXPENSE_SHEET)
+  if (!sheet) {
+    sheet = ss.insertSheet(EXPENSE_SHEET)
+    sheet.appendRow(EXPENSE_HEADERS)
+    sheet.getRange(1, 1, 1, EXPENSE_HEADERS.length).setFontWeight('bold')
+    sheet.setFrozenRows(1)
+  }
+  // 등록일시(1열)만 날짜, 나머지는 텍스트 (지출일·금액 보존)
+  sheet.getRange(1, 2, sheet.getMaxRows(), EXPENSE_HEADERS.length - 1).setNumberFormat('@')
+  return sheet
+}
+
+// 지출 내역 읽기
+function getExpenses() {
+  const sheet = getExpenseSheet()
+  const values = sheet.getDataRange().getValues()
+  const out = []
+  for (let i = 1; i < values.length; i++) {
+    const r = values[i]
+    if (!r[2] && !r[4]) continue // 계정·금액 둘 다 없으면 제외
+    out.push({
+      registeredAt: r[0], date: r[1], account: r[2], item: r[3],
+      amount: parseAmt(r[4]), method: r[5], memo: r[6],
+    })
+  }
+  return out
+}
+
+// 대여계약서에서 계약 수입 집계 (결제합계 상품+생화+대여품, 없으면 상품금액)
+function getIncomeList() {
+  const sheet = getContractSheet()
+  const values = sheet.getDataRange().getValues()
+  const iName = CONTRACT_KEYS.indexOf('brideName') + 1
+  const iProduct = CONTRACT_KEYS.indexOf('totalProduct') + 1
+  const iFlower = CONTRACT_KEYS.indexOf('totalFlower') + 1
+  const iRental = CONTRACT_KEYS.indexOf('totalRental') + 1
+  const iProductAmt = CONTRACT_KEYS.indexOf('productAmount') + 1
+  const out = []
+  for (let i = 1; i < values.length; i++) {
+    const r = values[i]
+    if (!r[1]) continue // 예약ID 없으면 제외
+    let amt = parseAmt(r[iProduct]) + parseAmt(r[iFlower]) + parseAmt(r[iRental])
+    if (amt === 0) amt = parseAmt(r[iProductAmt])
+    out.push({ date: r[0], name: r[iName], amount: amt })
+  }
+  return out
+}
+
+// 직원번호+비밀번호로 로그인 검증
+function loginStaff(staffNo, password) {
+  const sheet = getStaffSheet()
+  const values = sheet.getDataRange().getValues()
+  for (let i = 1; i < values.length; i++) {
+    const r = values[i]
+    if (String(r[10]) === String(staffNo) && String(r[11]) === String(password)) {
+      return { success: true, name: r[2], dept: r[3], position: r[4], staffNo: String(r[10]), categories: r[9] }
+    }
+  }
+  return { success: false, error: '직원번호 또는 비밀번호가 올바르지 않습니다.' }
 }
 
 // 설정 탭에서 카테고리 이름 맵 {id: label} 읽기
@@ -278,11 +372,31 @@ function doPost(e) {
     if (body.action === 'addStaff') {
       const s = body.staff || {}
       const stSheet = getStaffSheet()
+      const staffNo = nextStaffNo(stSheet)   // 직원번호 자동 생성
+      const password = genPassword()          // 비밀번호 자동 생성
       stSheet.appendRow([
         new Date(), s.hireDate || '', s.name || '', s.dept || '', s.position || '',
         s.phone || '', s.rrn || '', s.address || '', s.memo || '', s.categories || '',
+        staffNo, password,
+      ])
+      return jsonRes({ success: true, staffNo: staffNo, password: password })
+    }
+
+    if (body.action === 'login') {
+      return jsonRes(loginStaff(body.staffNo, body.password))
+    }
+
+    if (body.action === 'addExpense') {
+      const x = body.expense || {}
+      getExpenseSheet().appendRow([
+        new Date(), x.date || '', x.account || '', x.item || '',
+        x.amount || '', x.method || '', x.memo || '',
       ])
       return jsonRes({ success: true })
+    }
+
+    if (body.action === 'getAccounting') {
+      return jsonRes({ income: getIncomeList(), expenses: getExpenses() })
     }
 
     if (body.action === 'saveCategories') {
