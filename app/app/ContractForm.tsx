@@ -112,7 +112,7 @@ function buildHTML(r: RsvForContract, f: ReturnType<typeof makeInitialForm>) {
     ${th('연락처', { w: '7%' })}${td(v(r.bridePhone), { w: '10%' })}
     ${th('비상 연락처', { w: '8%' })}${td(v(f.emergencyPhone), { w: '10%' })}
     ${th('성명', { w: '6%' })}${td(v(f.emergencyName), { w: '8%' })}
-    ${th('이용 상품', { w: '8%' })}${td(v(r.product), { colspan: 3 })}
+    ${th('이용 상품', { w: '8%' })}${td(v(f.product), { colspan: 3 })}
   </tr>
   <tr>
     ${th('상품 금액')}${td(v(f.productAmount))}
@@ -122,7 +122,7 @@ function buildHTML(r: RsvForContract, f: ReturnType<typeof makeInitialForm>) {
     ${td('<div style="text-align:center; font-weight:700; font-size:12px; letter-spacing:2px;">AudreyTailor<br><span style="font-size:9px; font-weight:400;">WEDDING SHOP</span></div>', { colspan: 4, bg: '#f8f8f8' })}
   </tr>
   <tr>
-    ${th('작가 업체명')}${td(v(r.photoStudio), { colspan: 2 })}
+    ${th('작가 업체명')}${td(v(f.photoStudio), { colspan: 2 })}
     ${th('활영 일자')}${td(v(r.snapDate))}
     ${th('활영 시작 시간')}${td(v(r.snapTime))}
     ${th('예약금')}${td(v(f.depositAmount))}
@@ -294,6 +294,7 @@ function buildHTML(r: RsvForContract, f: ReturnType<typeof makeInitialForm>) {
 
 function makeInitialForm(r: RsvForContract) {
   return {
+    photoStudio: r.photoStudio || '', product: r.product || '',
     emergencyPhone: '', emergencyName: '',
     productAmount: '', depositAmount: '', depositDate: '', hairShop: '', paymentMethod: '',
     helperStaff: '', helperTime: '', carSupport: 'X' as string,
@@ -320,11 +321,15 @@ function makeInitialForm(r: RsvForContract) {
 export function ContractFormModal({
   reservation: r,
   onClose,
+  lists,
 }: {
   reservation: RsvForContract
   onClose: () => void
+  lists?: { photoVendors: string[]; products: string[] }
 }) {
   const [f, setF] = useState(() => makeInitialForm(r))
+  const photoVendors = lists?.photoVendors || []
+  const products = lists?.products || []
 
   const set = (key: string) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
@@ -374,9 +379,9 @@ export function ContractFormModal({
         id: r.id,
         brideName: r.brideName, bridePhone: r.bridePhone, groomName: r.groomName,
         emergencyPhone: f.emergencyPhone, emergencyName: f.emergencyName,
-        product: r.product, productAmount: f.productAmount, depositAmount: f.depositAmount,
+        product: f.product, productAmount: f.productAmount, depositAmount: f.depositAmount,
         depositDate: f.depositDate, paymentMethod: f.paymentMethod,
-        photoStudio: r.photoStudio, snapDate: r.snapDate, hairShop: f.hairShop,
+        photoStudio: f.photoStudio, snapDate: r.snapDate, hairShop: f.hairShop,
         helperService: r.helperService, helperStaff: f.helperStaff, helperTime: f.helperTime, carSupport: f.carSupport,
         flowerApplied: f.flowerApplied, flowerShop: f.flowerShop, flowerColor: f.flowerColor,
         flowerAmount: f.flowerAmount, flowerPayment: f.flowerPayment,
@@ -449,13 +454,23 @@ export function ContractFormModal({
             <Field label="비상 연락처 성명"><input style={inp} value={f.emergencyName} onChange={set('emergencyName')} placeholder="성함" /></Field>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
-            <Field label="이용 상품"><input style={inpFilled} readOnly value={r.product} /></Field>
+            <Field label="이용 상품">
+              <input style={inp} list="contract-products" value={f.product} onChange={set('product')} placeholder="목록 선택 또는 직접 입력" />
+              <datalist id="contract-products">
+                {products.map(p => <option key={p} value={p} />)}
+              </datalist>
+            </Field>
             <Field label="상품 금액"><input style={inp} value={f.productAmount} onChange={set('productAmount')} placeholder="예: 1,500,000" /></Field>
             <Field label="예약금"><input style={inp} value={f.depositAmount} onChange={set('depositAmount')} placeholder="예: 300,000" /></Field>
             <Field label="입금일자"><input style={inp} type="date" value={f.depositDate} onChange={set('depositDate')} /></Field>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
-            <Field label="작가 업체명"><input style={inpFilled} readOnly value={r.photoStudio} /></Field>
+            <Field label="작가 업체명">
+              <input style={inp} list="contract-vendors" value={f.photoStudio} onChange={set('photoStudio')} placeholder="목록 선택 또는 직접 입력" />
+              <datalist id="contract-vendors">
+                {photoVendors.map(v => <option key={v} value={v} />)}
+              </datalist>
+            </Field>
             <Field label="촬영 일자"><input style={inpFilled} readOnly value={r.snapDate} /></Field>
             <Field label="촬영 시작시간"><input style={inpFilled} readOnly value={r.snapTime} /></Field>
             <Field label="헤어/메이크업샵"><input style={inp} value={f.hairShop} onChange={set('hairShop')} placeholder="업체명" /></Field>

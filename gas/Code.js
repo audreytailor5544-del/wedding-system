@@ -5,6 +5,14 @@ const SPREADSHEET_ID = '1narswOt-LTZ6TGvRJcucGrql7HB5GGEU5tHEDg5j50I'
 const SHEET_NAME = '예약마스터'
 const CONTRACT_SHEET = '대여계약서'
 const SETTINGS_SHEET = '설정'
+const STAFF_SHEET = '직원'
+const PHOTO_SHEET = '포토거래처'
+const PRODUCT_SHEET = '이용상품'
+
+const STAFF_HEADERS = [
+  '등록일시', '입사일', '성명', '부서', '직급', '연락처',
+  '주민번호', '주소', '기타메모', '카테고리권한',
+]
 
 // 대여계약서 컬럼 — KEYS(영문, 클라이언트 전송 키)와 HEADERS(한글, 시트 표시)는
 // 같은 순서/길이를 유지한다. (작성일시는 1열에 별도로 GAS가 채움)
@@ -97,6 +105,72 @@ function getSettingsSheet() {
   return sheet
 }
 
+// 직원 탭 가져오기/생성 (날짜·번호가 자동 변환되지 않게 전 열 텍스트 형식)
+function getStaffSheet() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID)
+  let sheet = ss.getSheetByName(STAFF_SHEET)
+  if (!sheet) {
+    sheet = ss.insertSheet(STAFF_SHEET)
+    sheet.appendRow(STAFF_HEADERS)
+    sheet.getRange(1, 1, 1, STAFF_HEADERS.length).setFontWeight('bold')
+    sheet.setFrozenRows(1)
+  }
+  // 등록일시(1열)만 날짜, 나머지는 텍스트 (입사일·연락처·주민번호 보존)
+  sheet.getRange(1, 2, sheet.getMaxRows(), STAFF_HEADERS.length - 1).setNumberFormat('@')
+  return sheet
+}
+
+// 단일 컬럼 목록 탭(포토거래처/이용상품 등) 가져오기/생성
+function getListSheet(name, header) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID)
+  let sheet = ss.getSheetByName(name)
+  if (!sheet) {
+    sheet = ss.insertSheet(name)
+    sheet.appendRow([header])
+    sheet.getRange(1, 1, 1, 1).setFontWeight('bold')
+    sheet.setFrozenRows(1)
+    sheet.getRange(1, 1, sheet.getMaxRows(), 1).setNumberFormat('@')
+  }
+  return sheet
+}
+
+// 목록 값 배열 읽기 (헤더 제외, 빈값·중복 제거)
+function getListValues(name, header) {
+  const sheet = getListSheet(name, header)
+  const values = sheet.getDataRange().getValues()
+  const out = []
+  for (let i = 1; i < values.length; i++) {
+    const v = String(values[i][0] || '').trim()
+    if (v && out.indexOf(v) === -1) out.push(v)
+  }
+  return out
+}
+
+// 목록에 값 추가 (이미 있으면 무시) — 입력값이 목록으로 쌓여 재사용됨
+function addToList(name, header, value) {
+  const v = String(value || '').trim()
+  if (!v) return
+  const sheet = getListSheet(name, header)
+  const existing = getListValues(name, header)
+  if (existing.indexOf(v) === -1) sheet.appendRow([v])
+}
+
+// 직원 목록 읽기
+function getStaffList() {
+  const sheet = getStaffSheet()
+  const values = sheet.getDataRange().getValues()
+  const list = []
+  for (let i = 1; i < values.length; i++) {
+    const r = values[i]
+    if (!r[2]) continue // 성명 없는 행 제외
+    list.push({
+      registeredAt: r[0], hireDate: r[1], name: r[2], dept: r[3], position: r[4],
+      phone: r[5], rrn: r[6], address: r[7], memo: r[8], categories: r[9],
+    })
+  }
+  return list
+}
+
 // 설정 탭에서 카테고리 이름 맵 {id: label} 읽기
 function getCategories() {
   const sheet = getSettingsSheet()
@@ -143,9 +217,17 @@ function doGet() {
           inflow: r[17], notes: r[18], receiptNumber: r[19], category: r[20],
         }
       })
-    return jsonRes({ reservations: reservations, categories: getCategories() })
+    return jsonRes({
+      reservations: reservations,
+      categories: getCategories(),
+      staff: getStaffList(),
+      lists: {
+        photoVendors: getListValues(PHOTO_SHEET, '포토거래처'),
+        products: getListValues(PRODUCT_SHEET, '이용상품'),
+      },
+    })
   } catch (err) {
-    return jsonRes({ reservations: [], categories: {}, error: String(err) })
+    return jsonRes({ reservations: [], categories: {}, staff: [], lists: { photoVendors: [], products: [] }, error: String(err) })
   }
 }
 
@@ -167,6 +249,9 @@ function doPost(e) {
         r.photoStudio || '', r.product || '', r.helperService || '', r.bouquet || '',
         r.inflow || '', r.notes || '', r.receiptNumber || '', r.category || '',
       ])
+      // 새 포토거래처·이용상품을 목록에 자동 등록 (재사용)
+      addToList(PHOTO_SHEET, '포토거래처', r.photoStudio)
+      addToList(PRODUCT_SHEET, '이용상품', r.product)
       return jsonRes({ success: true, id: id })
     }
 
@@ -184,7 +269,20 @@ function doPost(e) {
         14: c.photoStudio, 15: c.product, 16: c.helperService,
         17: c.flowerApplied === 'O' ? c.flowerShop : '', 20: c.receiptNumber,
       })
+      // 계약서에서 입력/수정한 포토거래처·이용상품도 목록에 등록
+      addToList(PHOTO_SHEET, '포토거래처', c.photoStudio)
+      addToList(PRODUCT_SHEET, '이용상품', c.product)
       return jsonRes({ success: true, id: c.id || '' })
+    }
+
+    if (body.action === 'addStaff') {
+      const s = body.staff || {}
+      const stSheet = getStaffSheet()
+      stSheet.appendRow([
+        new Date(), s.hireDate || '', s.name || '', s.dept || '', s.position || '',
+        s.phone || '', s.rrn || '', s.address || '', s.memo || '', s.categories || '',
+      ])
+      return jsonRes({ success: true })
     }
 
     if (body.action === 'saveCategories') {

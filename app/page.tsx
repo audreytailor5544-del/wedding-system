@@ -42,17 +42,17 @@ export default function HomePage() {
           {/* CTA */}
           <div className="flex flex-col items-center gap-3">
             <a
-              href="/login"
+              href="/app"
               className="inline-flex items-center justify-center px-8 py-4 rounded-[12px] text-sm font-medium transition-opacity hover:opacity-90"
               style={{
                 backgroundColor: "#0096f7",
                 color: "#ffffff",
               }}
             >
-              직원 로그인
+              예약 관리 시작하기
             </a>
             <p className="text-xs" style={{ color: "#666666" }}>
-              권한이 있는 직원만 접근할 수 있습니다.
+              팀 예약 현황을 확인하고 관리합니다.
             </p>
           </div>
         </div>

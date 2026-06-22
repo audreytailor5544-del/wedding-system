@@ -258,10 +258,12 @@ function ReservationForm({
   initialDate,
   onClose,
   onSubmit,
+  lists,
 }: {
   initialDate: string | null
   onClose: () => void
   onSubmit: (r: Omit<Reservation, 'id'>, showContract: boolean) => void
+  lists?: { photoVendors: string[]; products: string[] }
 }) {
   const [form, setForm] = useState({
     brideName: '',
@@ -386,11 +388,17 @@ function ReservationForm({
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
                 <label style={labelStyle}>포토업체명</label>
-                <input style={inputStyle} value={form.photoStudio} onChange={set('photoStudio')} placeholder="업체명" />
+                <input style={inputStyle} list="rsv-vendors" value={form.photoStudio} onChange={set('photoStudio')} placeholder="목록 선택 또는 직접 입력" />
+                <datalist id="rsv-vendors">
+                  {(lists?.photoVendors || []).map(v => <option key={v} value={v} />)}
+                </datalist>
               </div>
               <div>
                 <label style={labelStyle}>오드리 이용상품</label>
-                <input style={inputStyle} value={form.product} onChange={set('product')} placeholder="이용 상품" />
+                <input style={inputStyle} list="rsv-products" value={form.product} onChange={set('product')} placeholder="목록 선택 또는 직접 입력" />
+                <datalist id="rsv-products">
+                  {(lists?.products || []).map(p => <option key={p} value={p} />)}
+                </datalist>
               </div>
               <div>
                 <label style={labelStyle}>헬퍼 서비스</label>
@@ -629,6 +637,267 @@ function ReservationDetail({
   )
 }
 
+// ─── 직원 관리 패널 ───────────────────────────────────────────────
+
+type Staff = {
+  registeredAt?: string; hireDate: string; name: string; dept: string; position: string
+  phone: string; rrn: string; address: string; memo: string; categories: string
+}
+
+function StaffPanel({
+  staffList,
+  onClose,
+  onRegistered,
+}: {
+  staffList: Staff[]
+  onClose: () => void
+  onRegistered: () => void
+}) {
+  const labelOf = useCatLabel()
+  const empty = { hireDate: '', name: '', dept: '', position: '', phone: '', rrn: '', address: '', memo: '', categories: [] as string[] }
+  const [form, setForm] = useState(empty)
+  const [saving, setSaving] = useState(false)
+
+  const set = (key: keyof typeof form) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
+      setForm(f => ({ ...f, [key]: e.target.value }))
+
+  const toggleCat = (id: string) =>
+    setForm(f => ({
+      ...f,
+      categories: f.categories.includes(id)
+        ? f.categories.filter(c => c !== id)
+        : [...f.categories, id],
+    }))
+
+  const submit = async () => {
+    if (!form.name.trim()) { alert('성명을 입력하세요.'); return }
+    setSaving(true)
+    try {
+      const res = await fetch('/api/sheets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'addStaff', staff: { ...form, categories: form.categories.join(', ') } }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        setForm(empty)
+        onRegistered()
+      } else {
+        alert('직원 저장 실패: ' + (data.error || '알 수 없는 오류'))
+      }
+    } catch {
+      alert('직원 저장 중 오류가 발생했습니다.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 24,
+    }}>
+      <div style={{ backgroundColor: '#fff', borderRadius: 18, width: '100%', maxWidth: 680, maxHeight: '92vh', overflow: 'auto', padding: 32 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>직원 관리</h2>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#999', lineHeight: 1 }}>✕</button>
+        </div>
+
+        {/* 등록 폼 */}
+        <div style={{ marginBottom: 28 }}>
+          <div style={sectionTitleStyle}>직원 등록</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
+            <div><label style={labelStyle}>입사일</label><input style={inputStyle} type="date" value={form.hireDate} onChange={set('hireDate')} /></div>
+            <div><label style={labelStyle}>성명 *</label><input style={inputStyle} value={form.name} onChange={set('name')} placeholder="성명" /></div>
+            <div><label style={labelStyle}>부서</label><input style={inputStyle} value={form.dept} onChange={set('dept')} placeholder="예: 드레스팀" /></div>
+            <div><label style={labelStyle}>직급</label><input style={inputStyle} value={form.position} onChange={set('position')} placeholder="예: 실장" /></div>
+            <div><label style={labelStyle}>연락처</label><input style={inputStyle} value={form.phone} onChange={set('phone')} placeholder="010-0000-0000" /></div>
+            <div><label style={labelStyle}>주민번호</label><input style={inputStyle} value={form.rrn} onChange={set('rrn')} placeholder="000000-0000000" /></div>
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label style={labelStyle}>주소</label>
+            <input style={inputStyle} value={form.address} onChange={set('address')} placeholder="주소" />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label style={labelStyle}>기타 메모</label>
+            <textarea style={{ ...inputStyle, height: 56, resize: 'none' }} value={form.memo} onChange={set('memo')} placeholder="기타 메모 사항" />
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <label style={labelStyle}>카테고리 권한</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {CATEGORIES.map(cat => {
+                const active = form.categories.includes(cat.id)
+                return (
+                  <button key={cat.id} type="button" onClick={() => toggleCat(cat.id)}
+                    style={{
+                      padding: '5px 13px', borderRadius: 24, border: `1.5px solid ${cat.color}`,
+                      backgroundColor: active ? cat.color : 'transparent', color: active ? '#fff' : cat.color,
+                      fontSize: 12, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
+                    }}>
+                    {labelOf(cat.id)}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+          <button onClick={submit} disabled={saving}
+            style={{ width: '100%', padding: '12px 0', borderRadius: 12, border: 'none', backgroundColor: '#0096f7', color: '#fff', fontSize: 14, fontWeight: 600, cursor: saving ? 'default' : 'pointer', fontFamily: 'inherit', opacity: saving ? 0.6 : 1 }}>
+            {saving ? '저장 중…' : '직원 등록'}
+          </button>
+        </div>
+
+        {/* 직원 목록 */}
+        <div>
+          <div style={sectionTitleStyle}>등록된 직원 ({staffList.length}명)</div>
+          {staffList.length === 0 ? (
+            <p style={{ fontSize: 13, color: '#aaa', padding: '8px 0' }}>아직 등록된 직원이 없습니다.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {staffList.map((s, i) => (
+                <div key={i} style={{ padding: '12px 14px', backgroundColor: '#fafaf7', borderRadius: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: '#222' }}>{s.name}</span>
+                    {s.position && <span style={{ fontSize: 12, color: '#888' }}>{s.position}</span>}
+                    {s.dept && <span style={{ fontSize: 11, color: '#0096f7' }}>{s.dept}</span>}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#777', display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                    {s.phone && <span>{s.phone}</span>}
+                    {s.hireDate && <span>입사 {s.hireDate}</span>}
+                    {s.categories && <span>권한: {String(s.categories).split(', ').filter(Boolean).map(id => labelOf(id)).join(', ')}</span>}
+                  </div>
+                  {s.memo && <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>{s.memo}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── 통계 패널 ────────────────────────────────────────────────────
+
+function StatBar({ label, count, max, color }: { label: string; count: number; max: number; color?: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+      <span style={{ width: 96, fontSize: 12, color: '#555', textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+      <div style={{ flex: 1, background: '#f0ede8', borderRadius: 6, height: 18 }}>
+        <div style={{ width: `${max ? (count / max) * 100 : 0}%`, minWidth: count ? 4 : 0, background: color || '#0096f7', height: '100%', borderRadius: 6 }} />
+      </div>
+      <span style={{ width: 30, fontSize: 12, fontWeight: 600, color: '#222', textAlign: 'right', flexShrink: 0 }}>{count}</span>
+    </div>
+  )
+}
+
+function StatsPanel({
+  reservations,
+  year,
+  month,
+  onClose,
+}: {
+  reservations: Reservation[]
+  year: number
+  month: number
+  onClose: () => void
+}) {
+  const labelOf = useCatLabel()
+
+  // 월별 (의상피팅 날짜 기준)
+  const monthly = useMemo(() => {
+    const map: Record<string, number> = {}
+    reservations.forEach(r => {
+      const ym = (r.fittingDate || '').slice(0, 7)
+      if (ym) map[ym] = (map[ym] || 0) + 1
+    })
+    return Object.entries(map).sort((a, b) => a[0].localeCompare(b[0]))
+  }, [reservations])
+
+  // 일별 (현재 보고 있는 달)
+  const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}`
+  const daily = useMemo(() => {
+    const map: Record<string, number> = {}
+    reservations.forEach(r => {
+      if ((r.fittingDate || '').startsWith(monthPrefix)) {
+        const day = r.fittingDate.slice(8, 10)
+        if (day) map[day] = (map[day] || 0) + 1
+      }
+    })
+    return Object.entries(map).sort((a, b) => a[0].localeCompare(b[0]))
+  }, [reservations, monthPrefix])
+
+  // 카테고리별 (한 예약이 여러 카테고리에 속할 수 있음)
+  const byCat = useMemo(() =>
+    CATEGORIES.map(c => ({
+      id: c.id, color: c.color,
+      count: reservations.filter(r => r.categories.includes(c.id)).length,
+    })).filter(x => x.count > 0).sort((a, b) => b.count - a.count)
+  , [reservations])
+
+  // 상품별
+  const byProduct = useMemo(() => {
+    const map: Record<string, number> = {}
+    reservations.forEach(r => {
+      const p = r.product || '(미지정)'
+      map[p] = (map[p] || 0) + 1
+    })
+    return Object.entries(map).sort((a, b) => b[1] - a[1])
+  }, [reservations])
+
+  const maxMonthly = Math.max(1, ...monthly.map(m => m[1]))
+  const maxDaily = Math.max(1, ...daily.map(d => d[1]))
+  const maxCat = Math.max(1, ...byCat.map(c => c.count))
+  const maxProduct = Math.max(1, ...byProduct.map(p => p[1]))
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 24,
+    }}>
+      <div style={{ backgroundColor: '#fff', borderRadius: 18, width: '100%', maxWidth: 620, maxHeight: '92vh', overflow: 'auto', padding: 32 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>예약 통계</h2>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#999', lineHeight: 1 }}>✕</button>
+        </div>
+        <p style={{ fontSize: 13, color: '#888', margin: '0 0 24px' }}>총 예약 <b style={{ color: '#0096f7' }}>{reservations.length}</b>건 · 의상피팅 날짜 기준</p>
+
+        <div style={{ marginBottom: 28 }}>
+          <div style={sectionTitleStyle}>월별 예약 건수</div>
+          {monthly.length === 0 ? <p style={{ fontSize: 13, color: '#aaa' }}>데이터 없음</p> :
+            monthly.map(([ym, n]) => (
+              <StatBar key={ym} label={`${ym.slice(0, 4)}년 ${Number(ym.slice(5, 7))}월`} count={n} max={maxMonthly} />
+            ))}
+        </div>
+
+        <div style={{ marginBottom: 28 }}>
+          <div style={sectionTitleStyle}>일별 예약 건수 — {year}년 {month + 1}월</div>
+          {daily.length === 0 ? <p style={{ fontSize: 13, color: '#aaa' }}>이 달 예약 없음</p> :
+            daily.map(([day, n]) => (
+              <StatBar key={day} label={`${Number(day)}일`} count={n} max={maxDaily} />
+            ))}
+        </div>
+
+        <div style={{ marginBottom: 28 }}>
+          <div style={sectionTitleStyle}>카테고리별 예약 건수</div>
+          {byCat.length === 0 ? <p style={{ fontSize: 13, color: '#aaa' }}>데이터 없음</p> :
+            byCat.map(c => (
+              <StatBar key={c.id} label={labelOf(c.id)} count={c.count} max={maxCat} color={c.color} />
+            ))}
+        </div>
+
+        <div>
+          <div style={sectionTitleStyle}>상품별 예약 건수</div>
+          {byProduct.length === 0 ? <p style={{ fontSize: 13, color: '#aaa' }}>데이터 없음</p> :
+            byProduct.map(([p, n]) => (
+              <StatBar key={p} label={p} count={n} max={maxProduct} color="#a855f7" />
+            ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── 메인 대시보드 ────────────────────────────────────────────────
 
 export default function AppDashboard() {
@@ -652,7 +921,19 @@ export default function AppDashboard() {
   const [editingCats, setEditingCats] = useState(false)
   const [draftLabels, setDraftLabels] = useState<Record<string, string>>({})
   const [savingCats, setSavingCats] = useState(false)
+  const [staff, setStaff] = useState<Staff[]>([])
+  const [showStaffPanel, setShowStaffPanel] = useState(false)
+  const [showStats, setShowStats] = useState(false)
+  const [lists, setLists] = useState<{ photoVendors: string[]; products: string[] }>({ photoVendors: [], products: [] })
   const searchRef = useRef<HTMLDivElement>(null)
+
+  // 직원 목록 새로고침
+  const reloadStaff = () => {
+    fetch('/api/sheets')
+      .then(r => r.json())
+      .then((data: { staff?: Staff[] }) => { if (data.staff) setStaff(data.staff) })
+      .catch(() => {})
+  }
 
   // 카테고리 표시 이름 (override 없으면 기본값)
   const labelOf = (id: string) =>
@@ -693,8 +974,10 @@ export default function AppDashboard() {
   useEffect(() => {
     fetch('/api/sheets')
       .then(r => r.json())
-      .then((data: { reservations?: Record<string, string>[]; categories?: Record<string, string> }) => {
+      .then((data: { reservations?: Record<string, string>[]; categories?: Record<string, string>; staff?: Staff[]; lists?: { photoVendors: string[]; products: string[] } }) => {
         if (data.categories) setCatLabels(data.categories)
+        if (data.staff) setStaff(data.staff)
+        if (data.lists) setLists(data.lists)
         if (data.reservations && data.reservations.length > 0) {
           setReservations(
             data.reservations.map(row => ({
@@ -911,6 +1194,29 @@ export default function AppDashboard() {
               )}
             </div>
           ))}
+        </div>
+
+        <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button
+            onClick={() => setShowStats(true)}
+            style={{
+              background: 'none', border: '1px solid #e7e3e1',
+              borderRadius: 10, padding: '9px 0', fontSize: 12, color: '#666',
+              cursor: 'pointer', width: '100%', fontFamily: 'inherit',
+            }}
+          >
+            통계
+          </button>
+          <button
+            onClick={() => setShowStaffPanel(true)}
+            style={{
+              background: 'none', border: '1px solid #e7e3e1',
+              borderRadius: 10, padding: '9px 0', fontSize: 12, color: '#666',
+              cursor: 'pointer', width: '100%', fontFamily: 'inherit',
+            }}
+          >
+            직원 관리
+          </button>
         </div>
       </aside>
 
@@ -1153,6 +1459,7 @@ export default function AppDashboard() {
           initialDate={selectedDate}
           onClose={() => { setShowForm(false); setSelectedDate(null) }}
           onSubmit={addReservation}
+          lists={lists}
         />
       )}
 
@@ -1178,6 +1485,24 @@ export default function AppDashboard() {
         <ContractFormModal
           reservation={contractFormReservation}
           onClose={() => setContractFormReservation(null)}
+          lists={lists}
+        />
+      )}
+
+      {showStaffPanel && (
+        <StaffPanel
+          staffList={staff}
+          onClose={() => setShowStaffPanel(false)}
+          onRegistered={reloadStaff}
+        />
+      )}
+
+      {showStats && (
+        <StatsPanel
+          reservations={reservations}
+          year={currentYear}
+          month={currentMonth}
+          onClose={() => setShowStats(false)}
         />
       )}
     </div>
