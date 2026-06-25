@@ -1,6 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+
+type Photo = { id: string; preview: string; file?: File; url?: string }
 
 // ─── 타입 ─────────────────────────────────────────────────────────
 
@@ -49,7 +51,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 // ─── HTML 생성 함수 ───────────────────────────────────────────────
 
-function buildHTML(r: RsvForContract, f: ReturnType<typeof makeInitialForm>) {
+function buildHTML(r: RsvForContract, f: ReturnType<typeof makeInitialForm>, photoUrls: string[] = []) {
   const td = (content: string, opts?: { colspan?: number; rowspan?: number; bg?: string; align?: string; bold?: boolean; w?: string }) => {
     const attrs = [
       opts?.colspan ? `colspan="${opts.colspan}"` : '',
@@ -286,6 +288,14 @@ function buildHTML(r: RsvForContract, f: ReturnType<typeof makeInitialForm>) {
   <tr>${th('성명')}${td('')}${th('서명')}${td('')}</tr>
 </table>
 
+${photoUrls.length ? `
+<div style="margin-top:18px;">
+  <div class="section-title" style="margin-bottom:8px;">첨부 사진</div>
+  <div style="display:flex; flex-wrap:wrap; gap:8px;">
+    ${photoUrls.map(u => `<img src="${u}" style="max-width:180px; max-height:180px; border:1px solid #ccc;" />`).join('')}
+  </div>
+</div>` : ''}
+
 </body>
 </html>`
 }
@@ -328,8 +338,46 @@ export function ContractFormModal({
   lists?: { photoVendors: string[]; products: string[] }
 }) {
   const [f, setF] = useState(() => makeInitialForm(r))
+  const [photos, setPhotos] = useState<Photo[]>([])
+  const [loadingSaved, setLoadingSaved] = useState(true)
   const photoVendors = lists?.photoVendors || []
   const products = lists?.products || []
+
+  // 저장된 계약서가 있으면 불러와서 폼·사진 복원 (스타일리스트 열람용)
+  useEffect(() => {
+    let alive = true
+    fetch('/api/sheets', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'getContract', id: r.id }),
+    })
+      .then(res => res.json())
+      .then((data: { contract?: Record<string, string> }) => {
+        if (!alive || !data.contract) return
+        const c = data.contract
+        if (c.raw) {
+          try { setF(JSON.parse(c.raw)) } catch { /* 무시 */ }
+        }
+        if (c.photos) {
+          setPhotos(String(c.photos).split(',').filter(Boolean).map((url, i) => ({ id: `s${i}`, preview: url, url })))
+        }
+      })
+      .catch(() => {})
+      .finally(() => { if (alive) setLoadingSaved(false) })
+    return () => { alive = false }
+  }, [r.id])
+
+  // 클립보드에서 이미지 붙여넣기
+  const onPaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    for (const it of items) {
+      if (it.type.startsWith('image/')) {
+        const file = it.getAsFile()
+        if (file) setPhotos(p => [...p, { id: `p${Date.now()}_${p.length}`, preview: URL.createObjectURL(file), file }])
+      }
+    }
+  }
+  const removePhoto = (id: string) => setPhotos(p => p.filter(x => x.id !== id))
 
   const set = (key: string) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
@@ -347,7 +395,7 @@ export function ContractFormModal({
   const [saved, setSaved] = useState(false)
 
   const handlePrint = () => {
-    const html = buildHTML(r, f)
+    const html = buildHTML(r, f, photos.map(p => p.url || p.preview))
     const win = window.open('', '_blank')
     if (!win) return
     win.document.write(html)
@@ -372,11 +420,36 @@ export function ContractFormModal({
     return [top && `상의: ${top}`, bottom && `하의: ${bottom}`].filter(Boolean).join(' | ')
   }
 
+  // 아직 업로드 안 된 사진(파일)을 Blob 에 올리고 URL 목록 반환
+  const uploadPendingPhotos = async (): Promise<string[]> => {
+    const urls: string[] = []
+    for (const p of photos) {
+      if (p.url) { urls.push(p.url); continue }
+      if (p.file) {
+        const ext = (p.file.type.split('/')[1] || 'png').replace('jpeg', 'jpg')
+        const res = await fetch(`/api/upload?filename=contract.${ext}`, {
+          method: 'POST',
+          headers: { 'Content-Type': p.file.type },
+          body: p.file,
+        })
+        const data = await res.json()
+        if (data.url) urls.push(data.url)
+        else throw new Error(data.error || '사진 업로드 실패')
+      }
+    }
+    return urls
+  }
+
   const handleSave = async () => {
     setSaving(true)
     try {
+      const photoUrls = await uploadPendingPhotos()
+      // 업로드 결과를 화면에도 반영 (재저장 시 중복 업로드 방지)
+      setPhotos(photoUrls.map((url, i) => ({ id: `s${i}`, preview: url, url })))
       const contract = {
         id: r.id,
+        photos: photoUrls.join(','),
+        raw: JSON.stringify(f),
         brideName: r.brideName, bridePhone: r.bridePhone, groomName: r.groomName,
         emergencyPhone: f.emergencyPhone, emergencyName: f.emergencyName,
         product: f.product, productAmount: f.productAmount, depositAmount: f.depositAmount,
@@ -684,6 +757,32 @@ export function ContractFormModal({
             <div><label style={lbl}>승인번호</label><input style={inp} value={f.approvalNumber} onChange={set('approvalNumber')} /></div>
             <div><label style={lbl}>발행일</label><input style={inp} type="date" value={f.issueDate} onChange={set('issueDate')} /></div>
           </div>
+        </div>
+
+        <hr style={{ border: 'none', borderTop: '1px solid #f0ede8', margin: '0 0 20px' }} />
+
+        {/* ── 첨부 사진 ── */}
+        <div style={{ marginBottom: 28 }}>
+          <div style={sec}>첨부 사진</div>
+          <div
+            onPaste={onPaste}
+            tabIndex={0}
+            style={{ border: '1.5px dashed #cdd6e0', borderRadius: 12, padding: 16, textAlign: 'center', color: '#8aa', fontSize: 13, cursor: 'text', outline: 'none', marginBottom: photos.length ? 12 : 0 }}
+          >
+            여기를 클릭한 뒤 <b style={{ color: '#0096f7' }}>Ctrl+V</b> 로 사진을 붙여넣으세요 (여러 장 가능)
+          </div>
+          {photos.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+              {photos.map(p => (
+                <div key={p.id} style={{ position: 'relative', width: 92, height: 92, borderRadius: 8, overflow: 'hidden', border: '1px solid #e7e3e1' }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={p.preview} alt="첨부" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  <button onClick={() => removePhoto(p.id)}
+                    style={{ position: 'absolute', top: 2, right: 2, width: 20, height: 20, borderRadius: '50%', border: 'none', background: 'rgba(0,0,0,0.6)', color: '#fff', fontSize: 13, cursor: 'pointer', lineHeight: 1 }}>×</button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* 버튼 */}

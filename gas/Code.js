@@ -34,6 +34,7 @@ const CONTRACT_KEYS = [
   'extra1', 'extra1Amount', 'extra2', 'extra2Amount', 'contractNotes',
   'totalProduct', 'totalFlower', 'totalRental',
   'payCard', 'payTransfer', 'payCash', 'receiptNumber', 'approvalNumber', 'issueDate',
+  'photos', 'raw',
 ]
 const CONTRACT_HEADERS = [
   '예약ID', '신부성함', '신부연락처', '신랑성함',
@@ -50,6 +51,7 @@ const CONTRACT_HEADERS = [
   '기타1', '기타1금액', '기타2', '기타2금액', '비고',
   '결제합계_상품', '결제합계_생화', '결제합계_대여품',
   '결제_카드', '결제_이체', '결제_현금', '현금영수증번호', '승인번호', '발행일',
+  '첨부사진', '데이터',
 ]
 
 // service-prd.md 예약 양식 필드 순서와 일치
@@ -232,6 +234,22 @@ function getExpenses() {
   return out
 }
 
+// 예약ID로 저장된 계약서(가장 최근) 불러오기 — 없으면 null
+function getContractById(id) {
+  if (!id) return null
+  const sheet = getContractSheet()
+  const values = sheet.getDataRange().getValues()
+  let found = null
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][1]) === String(id)) { // 2열 = 예약ID
+      const obj = { savedAt: values[i][0] }
+      CONTRACT_KEYS.forEach(function (k, idx) { obj[k] = values[i][idx + 1] })
+      found = obj // 마지막(최근) 행 유지
+    }
+  }
+  return found
+}
+
 // 대여계약서에서 계약 수입 집계 (결제합계 상품+생화+대여품, 없으면 상품금액)
 function getIncomeList() {
   const sheet = getContractSheet()
@@ -410,6 +428,10 @@ function doPost(e) {
 
     if (body.action === 'getAccounting') {
       return jsonRes({ income: getIncomeList(), expenses: getExpenses() })
+    }
+
+    if (body.action === 'getContract') {
+      return jsonRes({ contract: getContractById(body.id) })
     }
 
     if (body.action === 'saveCategories') {
