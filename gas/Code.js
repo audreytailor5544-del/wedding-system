@@ -95,16 +95,16 @@ function getContractSheet() {
   return sheet
 }
 
-// 설정 탭 (카테고리 이름 등 키-값) 가져오기/생성
+// 설정 탭 (카테고리 목록) 가져오기/생성 — id / 표시이름 / 색상
 function getSettingsSheet() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID)
   let sheet = ss.getSheetByName(SETTINGS_SHEET)
   if (!sheet) {
     sheet = ss.insertSheet(SETTINGS_SHEET)
-    sheet.appendRow(['카테고리ID', '표시이름'])
-    sheet.getRange(1, 1, 1, 2).setFontWeight('bold')
     sheet.setFrozenRows(1)
   }
+  sheet.getRange(1, 1, 1, 3).setValues([['카테고리ID', '표시이름', '색상']]).setFontWeight('bold')
+  sheet.getRange(1, 1, sheet.getMaxRows(), 3).setNumberFormat('@')
   return sheet
 }
 
@@ -265,15 +265,16 @@ function loginStaff(staffNo, password) {
   return { success: false, error: '직원번호 또는 비밀번호가 올바르지 않습니다.' }
 }
 
-// 설정 탭에서 카테고리 이름 맵 {id: label} 읽기
+// 설정 탭에서 카테고리 목록 읽기 [{id, label, color}] (비어있으면 빈 배열 → 앱이 기본값 사용)
 function getCategories() {
   const sheet = getSettingsSheet()
   const values = sheet.getDataRange().getValues()
-  const map = {}
+  const list = []
   for (let i = 1; i < values.length; i++) {
-    if (values[i][0]) map[String(values[i][0])] = String(values[i][1] || '')
+    const id = String(values[i][0] || '').trim()
+    if (id) list.push({ id: id, label: String(values[i][1] || ''), color: String(values[i][2] || '#64748b') })
   }
-  return map
+  return list
 }
 
 // 예약마스터 행을 예약ID로 찾아 겹치는 항목 갱신 (값이 있는 항목만)
@@ -386,6 +387,18 @@ function doPost(e) {
       return jsonRes(loginStaff(body.staffNo, body.password))
     }
 
+    if (body.action === 'updateStaffCategories') {
+      const stSheet = getStaffSheet()
+      const values = stSheet.getDataRange().getValues()
+      for (let i = 1; i < values.length; i++) {
+        if (String(values[i][10]) === String(body.staffNo)) { // 11열 = 직원번호
+          stSheet.getRange(i + 1, 10).setValue(body.categories || '') // 10열 = 카테고리권한
+          return jsonRes({ success: true })
+        }
+      }
+      return jsonRes({ success: false, error: '직원을 찾을 수 없습니다.' })
+    }
+
     if (body.action === 'addExpense') {
       const x = body.expense || {}
       getExpenseSheet().appendRow([
@@ -400,12 +413,13 @@ function doPost(e) {
     }
 
     if (body.action === 'saveCategories') {
-      const cats = body.categories || {}
+      // body.categories = [{id, label, color}, ...] (전체 목록 덮어쓰기)
+      const cats = body.categories || []
       const sSheet = getSettingsSheet()
       const last = sSheet.getLastRow()
       if (last > 1) sSheet.deleteRows(2, last - 1) // 헤더만 남기고 비움
-      Object.keys(cats).forEach(function (id) {
-        sSheet.appendRow([id, cats[id]])
+      cats.forEach(function (c) {
+        if (c && c.id) sSheet.appendRow([c.id, c.label || '', c.color || '#64748b'])
       })
       return jsonRes({ success: true })
     }

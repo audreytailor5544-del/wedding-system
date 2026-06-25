@@ -5,7 +5,11 @@ import { ContractFormModal } from './ContractForm'
 
 // ─── 타입 & 상수 ─────────────────────────────────────────────────
 
-const CATEGORIES = [
+type Cat = { id: string; label: string; color: string }
+type CategoryId = string
+
+// 기본(시드) 카테고리 — 시트 '설정' 탭이 비어있을 때만 사용. 이후 추가/삭제/이름수정은 시트에 저장된다.
+const DEFAULT_CATEGORIES: Cat[] = [
   { id: '드레스팀',      label: '드레스팀',      color: '#e879a0' },
   { id: '헤어메이크업팀', label: '헤어메이크업팀', color: '#a855f7' },
   { id: '스타일리스트1', label: '스타일리스트 1', color: '#3b82f6' },
@@ -15,17 +19,17 @@ const CATEGORIES = [
   { id: '스타일리스트5', label: '스타일리스트 5', color: '#ef4444' },
   { id: '스타일리스트6', label: '스타일리스트 6', color: '#a16207' },
   { id: '회계',         label: '회계',          color: '#64748b' },
-] as const
+]
 
-type CategoryId = typeof CATEGORIES[number]['id']
+// 새 카테고리 색상 팔레트 (추가 시 순환 배정)
+const CAT_PALETTE = ['#e879a0', '#a855f7', '#3b82f6', '#22c55e', '#f97316', '#06b6d4', '#ef4444', '#a16207', '#64748b', '#0096f7', '#14b8a6', '#eab308', '#f43f5e', '#8b5cf6']
 
-// 카테고리 표시 이름 — 시트의 '설정' 탭에서 불러온 override 를 컨텍스트로 공유한다.
-// id/색상은 고정, 이름(label)만 직원이 수정 가능.
-const CatLabelCtx = createContext<Record<string, string>>({})
+// 카테고리 목록을 컨텍스트로 공유 (추가/삭제/이름수정 반영)
+const CategoryCtx = createContext<Cat[]>(DEFAULT_CATEGORIES)
+function useCats() { return useContext(CategoryCtx) }
 function useCatLabel() {
-  const overrides = useContext(CatLabelCtx)
-  return (id: string) =>
-    overrides[id] || CATEGORIES.find(c => c.id === id)?.label || id
+  const cats = useCats()
+  return (id: string) => cats.find(c => c.id === id)?.label || id
 }
 
 type Reservation = {
@@ -307,6 +311,7 @@ function ReservationForm({
   }
 
   const labelOf = useCatLabel()
+  const cats = useCats()
 
   return (
     <div style={{
@@ -420,7 +425,7 @@ function ReservationForm({
           <div style={{ marginBottom: 24 }}>
             <div style={sectionTitleStyle}>담당 카테고리</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {CATEGORIES.map(cat => {
+              {cats.map(cat => {
                 const active = form.categories.includes(cat.id)
                 return (
                   <button
@@ -534,6 +539,7 @@ function ReservationDetail({
 }) {
   const statusStyle = STATUS_STYLE[reservation.status]
   const labelOf = useCatLabel()
+  const cats = useCats()
 
   return (
     <div style={{
@@ -597,7 +603,7 @@ function ReservationDetail({
                 <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>담당 카테고리</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                   {reservation.categories.map(catId => {
-                    const cat = CATEGORIES.find(c => c.id === catId)
+                    const cat = cats.find(c => c.id === catId)
                     return cat ? (
                       <span
                         key={catId}
@@ -655,10 +661,33 @@ function StaffPanel({
   onRegistered: () => void
 }) {
   const labelOf = useCatLabel()
+  const cats = useCats()
   const empty = { hireDate: '', name: '', dept: '', position: '', phone: '', rrn: '', address: '', memo: '', categories: [] as string[] }
   const [form, setForm] = useState(empty)
   const [saving, setSaving] = useState(false)
   const [created, setCreated] = useState<{ name: string; staffNo: string; password: string } | null>(null)
+  const [editPermNo, setEditPermNo] = useState<string | null>(null) // 권한 수정 중인 직원번호
+  const [draftPerms, setDraftPerms] = useState<string[]>([])
+  const [savingPerm, setSavingPerm] = useState(false)
+
+  const startEditPerm = (s: Staff) => {
+    setEditPermNo(s.staffNo || null)
+    setDraftPerms(String(s.categories || '').split(', ').filter(Boolean))
+  }
+  const togglePerm = (id: string) =>
+    setDraftPerms(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id])
+  const savePerm = async () => {
+    setSavingPerm(true)
+    try {
+      const res = await fetch('/api/sheets', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'updateStaffCategories', staffNo: editPermNo, categories: draftPerms.join(', ') }),
+      })
+      const data = await res.json()
+      if (data.success) { setEditPermNo(null); onRegistered() }
+      else alert('권한 저장 실패: ' + (data.error || ''))
+    } catch { alert('권한 저장 중 오류가 발생했습니다.') } finally { setSavingPerm(false) }
+  }
 
   const set = (key: keyof typeof form) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
@@ -729,7 +758,7 @@ function StaffPanel({
           <div style={{ marginBottom: 16 }}>
             <label style={labelStyle}>카테고리 권한</label>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {CATEGORIES.map(cat => {
+              {cats.map(cat => {
                 const active = form.categories.includes(cat.id)
                 return (
                   <button key={cat.id} type="button" onClick={() => toggleCat(cat.id)}
@@ -775,11 +804,35 @@ function StaffPanel({
                     {s.position && <span style={{ fontSize: 12, color: '#888' }}>{s.position}</span>}
                     {s.dept && <span style={{ fontSize: 11, color: '#0096f7' }}>{s.dept}</span>}
                   </div>
-                  <div style={{ fontSize: 12, color: '#777', display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                  <div style={{ fontSize: 12, color: '#777', display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
                     {s.phone && <span>{s.phone}</span>}
                     {s.hireDate && <span>입사 {s.hireDate}</span>}
-                    {s.categories && <span>권한: {String(s.categories).split(', ').filter(Boolean).map(id => labelOf(id)).join(', ')}</span>}
+                    <span>권한: {String(s.categories || '').split(', ').filter(Boolean).map(id => labelOf(id)).join(', ') || '없음'}</span>
+                    {editPermNo !== s.staffNo && (
+                      <button onClick={() => startEditPerm(s)} style={{ background: 'none', border: 'none', fontSize: 11, color: '#0096f7', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>권한 수정</button>
+                    )}
                   </div>
+                  {editPermNo === s.staffNo && (
+                    <div style={{ marginTop: 8, padding: 10, backgroundColor: '#fff', borderRadius: 8, border: '1px solid #eee' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                        {cats.map(cat => {
+                          const on = draftPerms.includes(cat.id)
+                          return (
+                            <button key={cat.id} type="button" onClick={() => togglePerm(cat.id)}
+                              style={{ padding: '3px 10px', borderRadius: 20, border: `1.5px solid ${cat.color}`, backgroundColor: on ? cat.color : 'transparent', color: on ? '#fff' : cat.color, fontSize: 11, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}>
+                              {cat.label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                        <button onClick={() => setEditPermNo(null)} style={{ background: 'none', border: 'none', fontSize: 12, color: '#aaa', cursor: 'pointer', fontFamily: 'inherit' }}>취소</button>
+                        <button onClick={savePerm} disabled={savingPerm} style={{ background: 'none', border: 'none', fontSize: 12, color: '#0096f7', fontWeight: 600, cursor: savingPerm ? 'default' : 'pointer', fontFamily: 'inherit', opacity: savingPerm ? 0.5 : 1 }}>
+                          {savingPerm ? '저장 중…' : '권한 저장'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   {(s.staffNo || s.password) && (
                     <div style={{ fontSize: 12, color: '#0070c0', marginTop: 4, display: 'flex', gap: 14 }}>
                       <span>직원번호 <b>{s.staffNo}</b></span>
@@ -823,6 +876,7 @@ function StatsPanel({
   onClose: () => void
 }) {
   const labelOf = useCatLabel()
+  const cats = useCats()
 
   // 월별 (의상피팅 날짜 기준)
   const monthly = useMemo(() => {
@@ -849,11 +903,11 @@ function StatsPanel({
 
   // 카테고리별 (한 예약이 여러 카테고리에 속할 수 있음)
   const byCat = useMemo(() =>
-    CATEGORIES.map(c => ({
+    cats.map(c => ({
       id: c.id, color: c.color,
       count: reservations.filter(r => r.categories.includes(c.id)).length,
     })).filter(x => x.count > 0).sort((a, b) => b.count - a.count)
-  , [reservations])
+  , [reservations, cats])
 
   // 상품별
   const byProduct = useMemo(() => {
@@ -1130,7 +1184,7 @@ export default function AppDashboard() {
   const [currentMonth, setCurrentMonth] = useState(today.getMonth())
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [activeCategories, setActiveCategories] = useState<Set<CategoryId>>(
-    new Set(CATEGORIES.map(c => c.id))
+    new Set(DEFAULT_CATEGORIES.map(c => c.id))
   )
   const [showForm, setShowForm] = useState(false)
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
@@ -1141,16 +1195,16 @@ export default function AppDashboard() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [sheetsLoading, setSheetsLoading] = useState(true)
   const [sheetsError, setSheetsError] = useState(false)
-  const [catLabels, setCatLabels] = useState<Record<string, string>>({})
+  const [cats, setCats] = useState<Cat[]>(DEFAULT_CATEGORIES)
   const [editingCats, setEditingCats] = useState(false)
-  const [draftLabels, setDraftLabels] = useState<Record<string, string>>({})
+  const [draftCats, setDraftCats] = useState<Cat[]>([])
   const [savingCats, setSavingCats] = useState(false)
   const [staff, setStaff] = useState<Staff[]>([])
   const [showStaffPanel, setShowStaffPanel] = useState(false)
   const [showStats, setShowStats] = useState(false)
   const [showAccounting, setShowAccounting] = useState(false)
   const [lists, setLists] = useState<{ photoVendors: string[]; products: string[] }>({ photoVendors: [], products: [] })
-  const [auth, setAuth] = useState<{ staffNo: string; name: string } | null>(null)
+  const [auth, setAuth] = useState<{ staffNo: string; name: string; categories?: string } | null>(null)
   const [authChecked, setAuthChecked] = useState(false)
   const searchRef = useRef<HTMLDivElement>(null)
 
@@ -1173,7 +1227,7 @@ export default function AppDashboard() {
       })
       const data = await res.json()
       if (data.success) {
-        const session = { staffNo: data.staffNo, name: data.name }
+        const session = { staffNo: data.staffNo, name: data.name, categories: data.categories || '' }
         setAuth(session)
         try { localStorage.setItem('staffSession', JSON.stringify(session)) } catch { /* 무시 */ }
         return null
@@ -1197,30 +1251,50 @@ export default function AppDashboard() {
       .catch(() => {})
   }
 
-  // 카테고리 표시 이름 (override 없으면 기본값)
-  const labelOf = (id: string) =>
-    catLabels[id] || CATEGORIES.find(c => c.id === id)?.label || id
+  // 카테고리 표시 이름 (cats 기준)
+  const labelOf = (id: string) => cats.find(c => c.id === id)?.label || id
 
-  // 이름 수정 시작 — 현재 이름들을 draft 로 복사
+  // ── 권한 ──
+  // 내 권한 카테고리. 비어있거나 '회계' 포함 시 관리자(전체 접근).
+  const myCats = auth?.categories ? auth.categories.split(', ').filter(Boolean) : []
+  const isAdmin = myCats.length === 0 || myCats.includes('회계')
+  // 화면에 보일 카테고리/예약 (비관리자는 본인 권한만)
+  const visibleCats = isAdmin ? cats : cats.filter(c => myCats.includes(c.id))
+  const visibleReservations = isAdmin ? reservations : reservations.filter(r => r.categories.some(c => myCats.includes(c)))
+
+  // 카테고리 편집 시작 — 현재 목록을 draft 로 복사
   const startEditCats = () => {
-    const draft: Record<string, string> = {}
-    CATEGORIES.forEach(c => { draft[c.id] = labelOf(c.id) })
-    setDraftLabels(draft)
+    setDraftCats(cats.map(c => ({ ...c })))
     setEditingCats(true)
   }
+  const updateDraftCat = (i: number, field: 'label' | 'color', value: string) =>
+    setDraftCats(d => d.map((c, idx) => idx === i ? { ...c, [field]: value } : c))
+  const cycleDraftColor = (i: number) =>
+    setDraftCats(d => d.map((c, idx) => {
+      if (idx !== i) return c
+      const cur = CAT_PALETTE.indexOf(c.color)
+      return { ...c, color: CAT_PALETTE[(cur + 1) % CAT_PALETTE.length] }
+    }))
+  const addDraftCat = () =>
+    setDraftCats(d => [...d, { id: `cat_${Date.now()}_${Math.floor(Math.random() * 1000)}`, label: '새 카테고리', color: CAT_PALETTE[d.length % CAT_PALETTE.length] }])
+  const removeDraftCat = (i: number) =>
+    setDraftCats(d => d.filter((_, idx) => idx !== i))
 
-  // 이름 저장 — 시트에 기록하고 화면 반영
+  // 카테고리 목록 저장 — 시트에 전체 덮어쓰기 후 화면 반영
   const saveCats = async () => {
+    const cleaned = draftCats.filter(c => c.label.trim())
+    if (cleaned.length === 0) { alert('카테고리가 최소 1개는 있어야 합니다.'); return }
     setSavingCats(true)
     try {
       const res = await fetch('/api/sheets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'saveCategories', categories: draftLabels }),
+        body: JSON.stringify({ action: 'saveCategories', categories: cleaned }),
       })
       const data = await res.json()
       if (data.success) {
-        setCatLabels(draftLabels)
+        setCats(cleaned)
+        setActiveCategories(new Set(cleaned.map(c => c.id)))
         setEditingCats(false)
       } else {
         alert('카테고리 저장 실패: ' + (data.error || '알 수 없는 오류'))
@@ -1236,8 +1310,11 @@ export default function AppDashboard() {
   useEffect(() => {
     fetch('/api/sheets')
       .then(r => r.json())
-      .then((data: { reservations?: Record<string, string>[]; categories?: Record<string, string>; staff?: Staff[]; lists?: { photoVendors: string[]; products: string[] } }) => {
-        if (data.categories) setCatLabels(data.categories)
+      .then((data: { reservations?: Record<string, string>[]; categories?: Cat[]; staff?: Staff[]; lists?: { photoVendors: string[]; products: string[] } }) => {
+        if (data.categories && data.categories.length > 0) {
+          setCats(data.categories)
+          setActiveCategories(new Set(data.categories.map(c => c.id)))
+        }
         if (data.staff) setStaff(data.staff)
         if (data.lists) setLists(data.lists)
         if (data.reservations && data.reservations.length > 0) {
@@ -1287,13 +1364,13 @@ export default function AppDashboard() {
     const q = searchQuery.trim()
     if (!q) return []
     const lower = q.toLowerCase()
-    return reservations.filter(r =>
+    return visibleReservations.filter(r =>
       r.brideName.toLowerCase().includes(lower) ||
       r.groomName.toLowerCase().includes(lower) ||
       r.bridePhone.includes(q) ||
       r.groomPhone.includes(q)
     ).slice(0, 6)
-  }, [searchQuery, reservations])
+  }, [searchQuery, visibleReservations])
 
   const calendarDays = useMemo(() => {
     const firstDay = new Date(currentYear, currentMonth, 1).getDay()
@@ -1325,14 +1402,18 @@ export default function AppDashboard() {
       map[date].push(entry)
     }
 
+    const myCatsArr = auth?.categories ? auth.categories.split(', ').filter(Boolean) : []
+    const admin = myCatsArr.length === 0 || myCatsArr.includes('회계')
+
     reservations.forEach(r => {
       if (r.categories.length === 0) {
-        // 카테고리 미지정 — fittingDate에 기본 색으로 표시
-        if (r.fittingDate) push(r.fittingDate, { reservation: r, categoryId: '드레스팀', time: r.fittingTime })
+        // 카테고리 미지정 — 관리자에게만 fittingDate에 기본 색으로 표시
+        if (admin && r.fittingDate) push(r.fittingDate, { reservation: r, categoryId: '드레스팀', time: r.fittingTime })
         return
       }
       r.categories.forEach(catId => {
         if (!activeCategories.has(catId)) return
+        if (!admin && !myCatsArr.includes(catId)) return // 권한 없는 카테고리는 숨김
         if (catId === '헤어메이크업팀') {
           const date = r.hairDate || r.fittingDate
           const time = r.hairDate ? r.hairTime : r.fittingTime
@@ -1344,11 +1425,11 @@ export default function AppDashboard() {
     })
 
     return map
-  }, [reservations, activeCategories])
+  }, [reservations, activeCategories, auth])
 
   const totalThisMonth = useMemo(() =>
-    reservations.filter(r => r.fittingDate?.startsWith(`${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`)).length
-  , [reservations, currentYear, currentMonth])
+    visibleReservations.filter(r => r.fittingDate?.startsWith(`${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`)).length
+  , [visibleReservations, currentYear, currentMonth])
 
   const prevMonth = () => {
     if (currentMonth === 0) { setCurrentYear(y => y - 1); setCurrentMonth(11) }
@@ -1392,7 +1473,7 @@ export default function AppDashboard() {
   if (!auth && staff.length > 0) return <LoginScreen onLogin={handleLogin} />
 
   return (
-    <CatLabelCtx.Provider value={catLabels}>
+    <CategoryCtx.Provider value={cats}>
     <div style={{
       display: 'flex', height: '100vh',
       fontFamily: "'Pretendard Variable', Pretendard, -apple-system, sans-serif",
@@ -1435,36 +1516,50 @@ export default function AppDashboard() {
                 </button>
               </div>
             ) : (
-              <button onClick={startEditCats} style={{ background: 'none', border: 'none', fontSize: 11, color: '#bbb', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>이름 수정</button>
+              isAdmin && <button onClick={startEditCats} style={{ background: 'none', border: 'none', fontSize: 11, color: '#bbb', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>편집</button>
             )}
           </div>
-          {CATEGORIES.map(cat => (
-            <div
-              key={cat.id}
-              onClick={editingCats ? undefined : () => toggleCategory(cat.id)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 9,
-                padding: '6px 4px', cursor: editingCats ? 'default' : 'pointer',
-                borderRadius: 8,
-                opacity: editingCats || activeCategories.has(cat.id) ? 1 : 0.3,
-                transition: 'opacity 0.15s',
-              }}
-            >
-              <div style={{
-                width: 10, height: 10, borderRadius: '50%',
-                backgroundColor: cat.color, flexShrink: 0,
-              }} />
-              {editingCats ? (
-                <input
-                  value={draftLabels[cat.id] ?? ''}
-                  onChange={e => setDraftLabels(d => ({ ...d, [cat.id]: e.target.value }))}
-                  style={{ flex: 1, minWidth: 0, fontSize: 13, padding: '3px 7px', border: '1px solid #e0ddd8', borderRadius: 6, fontFamily: 'inherit', color: '#222', outline: 'none' }}
-                />
-              ) : (
-                <span style={{ fontSize: 13, color: '#222' }}>{labelOf(cat.id)}</span>
-              )}
-            </div>
-          ))}
+
+          {editingCats ? (
+            <>
+              {draftCats.map((cat, i) => (
+                <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '4px 4px' }}>
+                  <div
+                    onClick={() => cycleDraftColor(i)}
+                    title="색상 변경"
+                    style={{ width: 14, height: 14, borderRadius: '50%', backgroundColor: cat.color, flexShrink: 0, cursor: 'pointer', border: '2px solid #fff', boxShadow: '0 0 0 1px #ddd' }}
+                  />
+                  <input
+                    value={cat.label}
+                    onChange={e => updateDraftCat(i, 'label', e.target.value)}
+                    style={{ flex: 1, minWidth: 0, fontSize: 13, padding: '3px 7px', border: '1px solid #e0ddd8', borderRadius: 6, fontFamily: 'inherit', color: '#222', outline: 'none' }}
+                  />
+                  <button onClick={() => removeDraftCat(i)} title="삭제"
+                    style={{ background: 'none', border: 'none', color: '#d77', fontSize: 15, cursor: 'pointer', flexShrink: 0, padding: '0 2px', lineHeight: 1 }}>×</button>
+                </div>
+              ))}
+              <button onClick={addDraftCat}
+                style={{ marginTop: 4, background: 'none', border: '1px dashed #d6d2cc', borderRadius: 8, padding: '6px 0', fontSize: 12, color: '#888', cursor: 'pointer', width: '100%', fontFamily: 'inherit' }}>
+                + 카테고리 추가
+              </button>
+            </>
+          ) : (
+            visibleCats.map(cat => (
+              <div
+                key={cat.id}
+                onClick={() => toggleCategory(cat.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 9,
+                  padding: '6px 4px', cursor: 'pointer', borderRadius: 8,
+                  opacity: activeCategories.has(cat.id) ? 1 : 0.3,
+                  transition: 'opacity 0.15s',
+                }}
+              >
+                <div style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: cat.color, flexShrink: 0 }} />
+                <span style={{ fontSize: 13, color: '#222' }}>{cat.label}</span>
+              </div>
+            ))
+          )}
         </div>
 
         <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1478,26 +1573,30 @@ export default function AppDashboard() {
           >
             통계
           </button>
-          <button
-            onClick={() => setShowAccounting(true)}
-            style={{
-              background: 'none', border: '1px solid #e7e3e1',
-              borderRadius: 10, padding: '9px 0', fontSize: 12, color: '#666',
-              cursor: 'pointer', width: '100%', fontFamily: 'inherit',
-            }}
-          >
-            회계
-          </button>
-          <button
-            onClick={() => setShowStaffPanel(true)}
-            style={{
-              background: 'none', border: '1px solid #e7e3e1',
-              borderRadius: 10, padding: '9px 0', fontSize: 12, color: '#666',
-              cursor: 'pointer', width: '100%', fontFamily: 'inherit',
-            }}
-          >
-            직원 관리
-          </button>
+          {isAdmin && (
+            <>
+              <button
+                onClick={() => setShowAccounting(true)}
+                style={{
+                  background: 'none', border: '1px solid #e7e3e1',
+                  borderRadius: 10, padding: '9px 0', fontSize: 12, color: '#666',
+                  cursor: 'pointer', width: '100%', fontFamily: 'inherit',
+                }}
+              >
+                회계
+              </button>
+              <button
+                onClick={() => setShowStaffPanel(true)}
+                style={{
+                  background: 'none', border: '1px solid #e7e3e1',
+                  borderRadius: 10, padding: '9px 0', fontSize: 12, color: '#666',
+                  cursor: 'pointer', width: '100%', fontFamily: 'inherit',
+                }}
+              >
+                직원 관리
+              </button>
+            </>
+          )}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 6, borderTop: '1px solid #f0ede8' }}>
             {auth ? (
               <>
@@ -1593,7 +1692,7 @@ export default function AppDashboard() {
                   </div>
                 ) : (
                   searchResults.map(r => {
-                    const cat = CATEGORIES.find(c => r.categories[0] === c.id)
+                    const cat = cats.find(c => r.categories[0] === c.id)
                     const statusStyle = STATUS_STYLE[r.status]
                     return (
                       <div
@@ -1722,7 +1821,7 @@ export default function AppDashboard() {
                   </div>
 
                   {rsvs.slice(0, 3).map((entry, i) => {
-                    const cat = CATEGORIES.find(c => c.id === entry.categoryId)
+                    const cat = cats.find(c => c.id === entry.categoryId)
                     return (
                       <div
                         key={`${entry.reservation.id}-${entry.categoryId}-${i}`}
@@ -1797,7 +1896,7 @@ export default function AppDashboard() {
 
       {showStats && (
         <StatsPanel
-          reservations={reservations}
+          reservations={visibleReservations}
           year={currentYear}
           month={currentMonth}
           onClose={() => setShowStats(false)}
@@ -1808,6 +1907,6 @@ export default function AppDashboard() {
         <AccountingPanel onClose={() => setShowAccounting(false)} />
       )}
     </div>
-    </CatLabelCtx.Provider>
+    </CategoryCtx.Provider>
   )
 }
