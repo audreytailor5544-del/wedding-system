@@ -1127,6 +1127,60 @@ function AccountingPanel({ onClose }: { onClose: () => void }) {
   )
 }
 
+// ─── 일정 알림(카카오) 패널 ───────────────────────────────────────
+
+type ScheduleRecipient = { name: string; phone: string; items: { bride: string; time: string; category: string; product: string }[]; message: string }
+
+function SchedulePanel({ onClose }: { onClose: () => void }) {
+  const d0 = new Date()
+  const todayStr = `${d0.getFullYear()}-${String(d0.getMonth() + 1).padStart(2, '0')}-${String(d0.getDate()).padStart(2, '0')}`
+  const [date, setDate] = useState(todayStr)
+  const [data, setData] = useState<{ schedule: ScheduleRecipient[]; alimtalkReady: boolean } | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    setLoading(true)
+    fetch('/api/sheets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'previewSchedule', date }) })
+      .then(r => r.json())
+      .then((d: { schedule?: ScheduleRecipient[]; alimtalkReady?: boolean }) => setData({ schedule: d.schedule || [], alimtalkReady: !!d.alimtalkReady }))
+      .catch(() => setData({ schedule: [], alimtalkReady: false }))
+      .finally(() => setLoading(false))
+  }, [date])
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 24 }}>
+      <div style={{ backgroundColor: '#fff', borderRadius: 18, width: '100%', maxWidth: 600, maxHeight: '92vh', overflow: 'auto', padding: 32 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>일정 알림 (카카오)</h2>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#999', lineHeight: 1 }}>✕</button>
+        </div>
+
+        <div style={{ padding: '10px 14px', borderRadius: 10, marginBottom: 18, fontSize: 12.5, backgroundColor: data?.alimtalkReady ? '#eafaf0' : '#fff6e5', color: data?.alimtalkReady ? '#1a7f44' : '#b8770a' }}>
+          {data?.alimtalkReady
+            ? '✓ 카카오 알림톡 연결됨 — 매일 오전 8시 담당 스타일리스트에게 자동 발송됩니다.'
+            : '⚠ 카카오 알림톡 미연결 — 아래는 발송될 내용 미리보기입니다. 알리고 설정 후 자동 발송이 켜집니다.'}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+          <label style={{ fontSize: 13, color: '#666' }}>날짜</label>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} style={{ ...inputStyle, width: 'auto' }} />
+        </div>
+
+        {loading ? <p style={{ fontSize: 13, color: '#aaa' }}>불러오는 중…</p> :
+          !data || data.schedule.length === 0 ? <p style={{ fontSize: 13, color: '#aaa' }}>이 날짜에 담당 스타일리스트 일정이 없습니다. (예약에 스타일리스트 카테고리가 지정되고, 그 권한을 가진 직원이 있어야 표시됩니다.)</p> :
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {data.schedule.map((s, i) => (
+              <div key={i} style={{ padding: '14px 16px', backgroundColor: '#fafaf7', borderRadius: 10 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: '#222', marginBottom: 6 }}>{s.name} <span style={{ fontSize: 12, color: '#888', fontWeight: 400 }}>{s.phone || '연락처 없음'}</span></div>
+                <pre style={{ margin: 0, fontSize: 12.5, color: '#555', whiteSpace: 'pre-wrap', fontFamily: 'inherit', lineHeight: 1.6 }}>{s.message}</pre>
+              </div>
+            ))}
+          </div>}
+      </div>
+    </div>
+  )
+}
+
 // ─── 로그인 화면 ──────────────────────────────────────────────────
 
 function LoginScreen({ onLogin }: { onLogin: (staffNo: string, password: string) => Promise<string | null> }) {
@@ -1203,6 +1257,7 @@ export default function AppDashboard() {
   const [showStaffPanel, setShowStaffPanel] = useState(false)
   const [showStats, setShowStats] = useState(false)
   const [showAccounting, setShowAccounting] = useState(false)
+  const [showSchedule, setShowSchedule] = useState(false)
   const [lists, setLists] = useState<{ photoVendors: string[]; products: string[] }>({ photoVendors: [], products: [] })
   const [auth, setAuth] = useState<{ staffNo: string; name: string; categories?: string } | null>(null)
   const [authChecked, setAuthChecked] = useState(false)
@@ -1586,6 +1641,16 @@ export default function AppDashboard() {
                 회계
               </button>
               <button
+                onClick={() => setShowSchedule(true)}
+                style={{
+                  background: 'none', border: '1px solid #e7e3e1',
+                  borderRadius: 10, padding: '9px 0', fontSize: 12, color: '#666',
+                  cursor: 'pointer', width: '100%', fontFamily: 'inherit',
+                }}
+              >
+                일정 알림
+              </button>
+              <button
                 onClick={() => setShowStaffPanel(true)}
                 style={{
                   background: 'none', border: '1px solid #e7e3e1',
@@ -1905,6 +1970,10 @@ export default function AppDashboard() {
 
       {showAccounting && (
         <AccountingPanel onClose={() => setShowAccounting(false)} />
+      )}
+
+      {showSchedule && (
+        <SchedulePanel onClose={() => setShowSchedule(false)} />
       )}
     </div>
     </CategoryCtx.Provider>

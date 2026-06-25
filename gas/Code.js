@@ -270,6 +270,104 @@ function getIncomeList() {
   return out
 }
 
+// ── 당일 일정 카카오 알림톡 ──────────────────────────────
+// 예약마스터를 객체 배열로 읽기
+function getReservations() {
+  const values = getSheet().getDataRange().getValues()
+  const out = []
+  for (let i = 1; i < values.length; i++) {
+    const r = values[i]
+    if (!r[1]) continue
+    out.push({
+      id: r[1], brideName: r[3], bridePhone: r[4],
+      fittingDate: r[7], fittingTime: r[8], hairDate: r[9], hairTime: r[10],
+      snapDate: r[11], snapTime: r[12], product: r[14], category: r[20],
+    })
+  }
+  return out
+}
+
+// 특정 날짜(yyyy-MM-dd)의 담당 스타일리스트별 일정 묶음
+// 반환: [{ staffNo, name, phone, items:[{bride, time, category, product}] }]
+function getScheduleFor(dateStr) {
+  const resvs = getReservations()
+  const staffList = getStaffList()
+  const byStaff = {}
+  resvs.forEach(function (r) {
+    const cats = String(r.category || '').split(', ').filter(Boolean)
+    cats.forEach(function (cat) {
+      const date = cat === '헤어메이크업팀' ? r.hairDate : r.fittingDate
+      if (String(date) !== String(dateStr)) return
+      const time = cat === '헤어메이크업팀' ? r.hairTime : r.fittingTime
+      staffList.forEach(function (s) {
+        const perms = String(s.categories || '').split(', ').filter(Boolean)
+        if (perms.indexOf(cat) === -1) return
+        const key = s.staffNo || s.name
+        if (!byStaff[key]) byStaff[key] = { staffNo: s.staffNo, name: s.name, phone: s.phone, items: [] }
+        byStaff[key].items.push({ bride: r.brideName, time: time, category: cat, product: r.product })
+      })
+    })
+  })
+  return Object.keys(byStaff).map(function (k) { return byStaff[k] })
+}
+
+// 알림톡 메시지 본문 (승인 템플릿과 내용이 일치해야 함)
+function composeMessage(name, items) {
+  const lines = items.map(function (it) {
+    return '· ' + (it.time || '시간미정') + '  ' + (it.bride || '') + ' (' + it.category + ')'
+  })
+  return '[오드리테일러] ' + name + '님, 오늘 일정 안내드립니다.\n\n' + lines.join('\n') + '\n\n확인 부탁드립니다.'
+}
+
+// 알리고 알림톡 발송 (Script Properties 에 키 설정 필요)
+function sendAlimTalk_(phone, message) {
+  const p = PropertiesService.getScriptProperties()
+  const apikey = p.getProperty('ALIGO_APIKEY')
+  const userid = p.getProperty('ALIGO_USERID')
+  const senderkey = p.getProperty('ALIGO_SENDERKEY')
+  const tplcode = p.getProperty('ALIGO_TPLCODE')
+  const sender = p.getProperty('ALIGO_SENDER')
+  if (!apikey || !userid || !senderkey || !tplcode || !sender) {
+    return { configured: false }
+  }
+  const res = UrlFetchApp.fetch('https://kakaoapi.aligo.in/akv10/alimtalk/send/', {
+    method: 'post',
+    payload: {
+      apikey: apikey, userid: userid, senderkey: senderkey, tpl_code: tplcode,
+      sender: sender, receiver_1: String(phone).replace(/[^0-9]/g, ''),
+      subject_1: '오늘 일정 안내', message_1: message,
+    },
+    muteHttpExceptions: true,
+  })
+  return { configured: true, response: res.getContentText() }
+}
+
+// 매일 자동 실행 — 오늘 일정 알림톡 발송 (트리거가 호출)
+function dailyScheduleNotify() {
+  const today = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd')
+  const schedule = getScheduleFor(today)
+  schedule.forEach(function (s) {
+    if (!s.phone) return
+    const msg = composeMessage(s.name, s.items)
+    const r = sendAlimTalk_(s.phone, msg)
+    Logger.log('알림 ' + s.name + '(' + s.phone + '): ' + JSON.stringify(r))
+  })
+  return schedule.length
+}
+
+// 매일 오전 8시 자동 실행 트리거 설치 (편집기에서 1회 실행)
+function installDailyTrigger() {
+  uninstallDailyTrigger()
+  ScriptApp.newTrigger('dailyScheduleNotify').timeBased().everyDays(1).atHour(8).inTimezone('Asia/Seoul').create()
+  return '매일 오전 8시 알림 트리거 설치됨'
+}
+function uninstallDailyTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'dailyScheduleNotify') ScriptApp.deleteTrigger(t)
+  })
+  return '기존 트리거 제거됨'
+}
+
 // 직원번호+비밀번호로 로그인 검증
 function loginStaff(staffNo, password) {
   const sheet = getStaffSheet()
@@ -432,6 +530,16 @@ function doPost(e) {
 
     if (body.action === 'getContract') {
       return jsonRes({ contract: getContractById(body.id) })
+    }
+
+    if (body.action === 'previewSchedule') {
+      const date = body.date || Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd')
+      const schedule = getScheduleFor(date).map(function (s) {
+        return { name: s.name, phone: s.phone, items: s.items, message: composeMessage(s.name, s.items) }
+      })
+      const p = PropertiesService.getScriptProperties()
+      const ready = !!(p.getProperty('ALIGO_APIKEY') && p.getProperty('ALIGO_SENDERKEY') && p.getProperty('ALIGO_TPLCODE'))
+      return jsonRes({ date: date, schedule: schedule, alimtalkReady: ready })
     }
 
     if (body.action === 'saveCategories') {
